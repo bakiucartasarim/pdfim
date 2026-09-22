@@ -101,32 +101,71 @@ class PDFEditor:
                         }
         return None
 
-    def text_in_rect(self, page_num: int, pdf_rect: tuple) -> str:
-        """Bir dikdörtgenin içine düşen kelimeleri okunabilir metne çevirir.
+    @staticmethod
+    def clean_text(text: str) -> str:
+        """Panoya gidecek metni temizle. PDFim'in yazdığı metinlerde boşluklar
+        NBSP (\\xa0) olarak çıkıyor; Excel'e yapıştırınca sayılar sayı sayılmıyordu."""
+        # U+00AD: Arial'in tire glifi geri okunurken "yumuşak tire" çıkıyor ("PX-300" → "PX300" olmasın)
+        return text.replace("\xa0", " ").replace("­", "-")
 
-        PyMuPDF'in `words` çıktısı: (x0, y0, x1, y1, kelime, blok_no, satır_no, kelime_no)
-        Kelimenin merkezi seçim dikdörtgeninin içindeyse alınır; sonra
-        (blok, satır) grupları hâlinde satırlara dizilir.
+    def select_words(self, page_num: int, pdf_rect: tuple) -> tuple[str, list]:
+        """Bir dikdörtgenin içine düşen kelimeler → (okunabilir metin, kelime kutuları).
+
+        Kelimenin merkezi seçim dikdörtgenindeyse alınır. Satırlar PDF'in iç
+        blok/satır yapısına göre değil *ekrandaki yatay hizaya* göre kurulur:
+        datasheet tablolarında her sütun ayrı bloktur, yapıya göre gruplayınca
+        "Gerilim" ile "24 V" ayrı satırlara düşüyordu. Sütun boşlukları Tab olur —
+        Excel'e yapıştırınca hücrelere dağılır. Kutular vurgulama için döner.
         """
         if not self.doc:
-            return ""
+            return "", []
         page = self.doc[page_num]
         sel = fitz.Rect(pdf_rect)
         sel.normalize()
 
-        rows: dict = {}
-        for x0, y0, x1, y1, word, bno, lno, wno in page.get_text(
-            "words", flags=fitz.TEXT_PRESERVE_WHITESPACE
-        ):
+        words = []
+        for x0, y0, x1, y1, word, *_ in page.get_text("words", flags=fitz.TEXT_PRESERVE_WHITESPACE):
             cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
             if sel.x0 <= cx <= sel.x1 and sel.y0 <= cy <= sel.y1:
-                rows.setdefault((bno, lno), []).append((x0, wno, word))
+                words.append((x0, y0, x1, y1, word))
+        if not words:
+            return "", []
 
-        lines = []
-        for key in sorted(rows):
-            words = sorted(rows[key], key=lambda t: (t[1], t[0]))
-            lines.append(" ".join(w for _, _, w in words))
-        return "\n".join(lines).strip()
+        # Dikey merkezi yakın kelimeler aynı satır (yükseklikten yarımından az fark)
+        words.sort(key=lambda t: ((t[1] + t[3]) / 2, t[0]))
+        rows: list[dict] = []
+        for wd in words:
+            cy, h = (wd[1] + wd[3]) / 2, wd[3] - wd[1]
+            if rows and abs(cy - rows[-1]["cy"]) <= max(h, rows[-1]["h"]) * 0.5:
+                rows[-1]["words"].append(wd)
+            else:
+                rows.append({"cy": cy, "h": h, "words": [wd]})
+
+        lines, prev = [], None
+        for row in rows:
+            ws = sorted(row["words"], key=lambda t: t[0])
+            parts = [ws[0][4]]
+            for a, b in zip(ws, ws[1:]):
+                # Kelime arası ~0.3 em; bir satır yüksekliğinden büyük boşluk = yeni sütun
+                parts.append("\t" if b[0] - a[2] > row["h"] * 0.9 else " ")
+                parts.append(b[4])
+            if prev and row["cy"] - prev["cy"] > max(row["h"], prev["h"]) * 2.2:
+                lines.append("")                 # paragraf arası boş satır
+            lines.append("".join(parts))
+            prev = row
+        return self.clean_text("\n".join(lines).strip()), [w[:4] for w in words]
+
+    def text_in_rect(self, page_num: int, pdf_rect: tuple) -> str:
+        return self.select_words(page_num, pdf_rect)[0]
+
+    def line_text_at(self, page_num: int, rect: tuple) -> str:
+        """Span'in hizasındaki tüm satır, sayfa genişliğince (tablo satırı → Tab'lı hücreler)"""
+        pr = self.doc[page_num].rect
+        r = fitz.Rect(rect)
+        return self.select_words(page_num, (pr.x0, r.y0, pr.x1, r.y1))[0]
+
+    def page_text(self, page_num: int) -> str:
+        return self.select_words(page_num, tuple(self.doc[page_num].rect))[0]
 
     # ── Metin işlemleri ───────────────────────────────────────────────────────
 

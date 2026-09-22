@@ -212,6 +212,7 @@ class MainWindow(QMainWindow):
         self.viewer.text_select_done.connect(self._on_text_selected)
         self.viewer.area_erase_done.connect(self._on_erase_area)
         self.viewer.image_align_req.connect(self._on_image_align)
+        self.viewer.copy_requested.connect(self._on_copy_requested)
         self.viewer.ctrl_scroll.connect(lambda d: self._zoom_in() if d > 0 else self._zoom_out())
         self.viewer._scroll.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
@@ -293,8 +294,14 @@ class MainWindow(QMainWindow):
         self.act_copy = QAction("Kopyala", self)
         self.act_copy.setShortcut(QKeySequence.StandardKey.Copy)
         self.act_copy.setEnabled(False)
-        self.act_copy.triggered.connect(self._copy_last_selection)
+        self.act_copy.triggered.connect(self._copy_current)
         m_edit.addAction(self.act_copy)
+
+        self.act_select_all = QAction("Sayfadaki Tüm Metni Seç", self)
+        self.act_select_all.setShortcut(QKeySequence.StandardKey.SelectAll)
+        self.act_select_all.setEnabled(False)
+        self.act_select_all.triggered.connect(self._select_page_text)
+        m_edit.addAction(self.act_select_all)
 
         # ── Görünüm ──
         m_view = mb.addMenu("Görünüm")
@@ -480,10 +487,12 @@ class MainWindow(QMainWindow):
 
         if mode == "text":
             self._mode_badge.setText("✏  Metin Modu")
-            self._status_lbl.setText("Metne çift tıkla → düzenle  ·  Tek tıkla sürükle → taşı")
+            self._status_lbl.setText(
+                "Çift tıkla → düzenle  ·  Sürükle → taşı  ·  Tıkla + Ctrl+C / sağ tık → kopyala")
         elif mode == "select":
             self._mode_badge.setText("⧉  Metin Seç Modu")
-            self._status_lbl.setText("Metnin üzerinde sürükleyerek seç → otomatik kopyalanır (Ctrl+C)")
+            self._status_lbl.setText(
+                "Sürükleyerek seç → otomatik kopyalanır  ·  Ctrl+A → tüm sayfa  ·  Sağ tık → menü")
         elif mode == "erase":
             self._mode_badge.setText("🩹  Alan Sil Modu")
             self._status_lbl.setText("Silmek istediğin alanı sürükleyerek seç → üzeri beyazla kapanır")
@@ -546,7 +555,8 @@ class MainWindow(QMainWindow):
         count = self.editor.page_count()
 
         self.setWindowTitle(f"PDFim — {name}")
-        for a in (self.act_save, self.act_save_tb, self.act_saveas, self.act_saveas_tb):
+        for a in (self.act_save, self.act_save_tb, self.act_saveas, self.act_saveas_tb,
+                  self.act_copy, self.act_select_all):
             a.setEnabled(True)
 
         # Undo/redo sıfırla
@@ -844,21 +854,63 @@ class MainWindow(QMainWindow):
     def _on_text_selected(self, wr: tuple, page_num: int):
         zoom = self.viewer.zoom
         pdf_rect = (wr[0]/zoom, wr[1]/zoom, wr[2]/zoom, wr[3]/zoom)
-        txt = self.editor.text_in_rect(page_num, pdf_rect)
+        txt, rects = self.editor.select_words(page_num, pdf_rect)
+        lbl = self.viewer.get_page_label(page_num)
+        if lbl:
+            lbl.set_selection_highlight([tuple(v*zoom for v in r) for r in rects])
         if not txt:
             self._status_lbl.setText("Seçilen alanda metin yok.")
             return
+        self._to_clipboard(txt)
+
+    def _to_clipboard(self, txt: str, what: str = ""):
+        if not txt:
+            self._status_lbl.setText("Kopyalanacak metin yok.")
+            return
         QApplication.clipboard().setText(txt)
         self._last_copied = txt
-        self.act_copy.setEnabled(True)
-        n = len(txt)
-        preview = txt.replace("\n", " ")[:50]
-        self._status_lbl.setText(f"Kopyalandı ({n} karakter): \"{preview}\"")
+        preview = txt.replace("\n", " ").replace("\t", " · ")[:50]
+        self._status_lbl.setText(f"Kopyalandı{what} ({len(txt)} karakter): \"{preview}\"")
 
-    def _copy_last_selection(self):
+    def _copy_current(self):
+        """Ctrl+C: metin modunda tıklanmış metin, yoksa son seçim.
+        (Düzenleme kutusu açıkken Ctrl+C'yi kutunun kendisi karşılar.)"""
+        if not self.editor.doc:
+            return
+        if self._current_mode == "text":
+            sel = self.viewer.selected_span()
+            if sel:
+                self._to_clipboard(self.editor.clean_text(sel[1]["text"]).strip())
+                return
         if self._last_copied:
-            QApplication.clipboard().setText(self._last_copied)
-            self._status_lbl.setText("Panoya kopyalandı.")
+            self._to_clipboard(self._last_copied)
+        else:
+            self._status_lbl.setText(
+                "Önce bir metne tıklayın (Metin modu) ya da alan seçin (Metin Seç modu, Ctrl+3).")
+
+    def _select_page_text(self):
+        """Ctrl+A: ekrandaki sayfanın tüm metnini seç ve kopyala"""
+        if not self.editor.doc:
+            return
+        page_num = self.viewer.center_page()
+        if self._current_mode != "select":
+            self._set_mode("select")
+        self._on_text_selected(tuple(v * self.viewer.zoom for v in self.editor.doc[page_num].rect),
+                               page_num)
+
+    def _on_copy_requested(self, kind: str, span, page_num: int):
+        """Sağ tık menüsünden gelen kopyalama istekleri"""
+        if kind == "span":
+            self._to_clipboard(self.editor.clean_text(span["text"]).strip())
+        elif kind == "line":
+            self._to_clipboard(self.editor.line_text_at(page_num, span["rect"]), " — satır")
+        elif kind == "page":
+            if self._current_mode == "select":
+                self._select_page_text()
+            else:
+                self._to_clipboard(self.editor.page_text(page_num), f" — sayfa {page_num + 1}")
+        elif kind == "selection":
+            self._copy_current()
 
     def _on_erase_area(self, wr: tuple, page_num: int):
         if not self.editor.doc:
@@ -1057,10 +1109,10 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "PDFim Hakkında",
             "<h2 style='color:#cdd6f4; margin:0'>PDFim</h2>"
-            "<p style='color:#a6adc8'>Sürüm 1.2  —  PDF Editörü</p>"
+            "<p style='color:#a6adc8'>Sürüm 1.3  —  PDF Editörü</p>"
             "<p style='color:#6c7086; font-size:12px'>"
             "PyMuPDF + PyQt6 ile geliştirildi.<br>"
-            "Metin düzenleme · Biçim çubuğu · Resim hizalama · Orijinal font desteği"
+            "Metin düzenleme · Biçim çubuğu · Metin kopyalama · Resim hizalama · Orijinal font desteği"
             "</p>",
         )
 

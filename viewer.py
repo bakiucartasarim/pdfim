@@ -111,6 +111,7 @@ class PageLabel(QLabel):
     text_select_done    = pyqtSignal(tuple)   # (wx0, wy0, wx1, wy1) widget koordinatında
     area_erase_done     = pyqtSignal(tuple)   # aynı — "alan sil" modu
     image_align_req     = pyqtSignal(dict, str)   # (resim, "left"|"hcenter"|"right"|"top"|"vcenter"|"bottom")
+    copy_requested      = pyqtSignal(str, object) # ("span"|"line"|"page"|"selection", span | None)
 
     SNAP_PX = 6   # bu kadar piksel yakına gelince kılavuz çizgiye yapışır
 
@@ -146,6 +147,8 @@ class PageLabel(QLabel):
         self._snap_xs: list[float] = []
         self._snap_ys: list[float] = []
         self._guides: list[tuple] = []        # ("v", x) / ("h", y)
+        # Metin Seç modunda kopyalanan kelimelerin kutuları (widget koordinatı)
+        self._sel_highlight: list[tuple] = []
 
     # ── Mod & veri ───────────────────────────────────────────────────────────
 
@@ -156,6 +159,7 @@ class PageLabel(QLabel):
         self._text_sel = None; self._text_drag_start = None
         self._text_drag_cur_wr = None
         self._sel_start = None; self._sel_cur = None
+        self._sel_highlight = []
         cursor = (Qt.CursorShape.CrossCursor if mode in ("select", "erase")
                   else Qt.CursorShape.ArrowCursor)
         self.setCursor(cursor)
@@ -174,6 +178,17 @@ class PageLabel(QLabel):
 
     def set_snap_lines(self, xs: list, ys: list):
         self._snap_xs, self._snap_ys = xs, ys
+
+    def set_selection_highlight(self, rects: list):
+        self._sel_highlight = rects
+        self.update()
+
+    def has_selection(self) -> bool:
+        return bool(self._sel_highlight)
+
+    def get_text_selection(self) -> "dict | None":
+        """Metin modunda tek tıkla seçilmiş (kesikli çerçeveli) span"""
+        return self._text_sel if self._mode == "text" else None
 
     def get_selected(self) -> "dict | None":
         return self._selected
@@ -208,6 +223,7 @@ class PageLabel(QLabel):
         if self._mode in ("select", "erase"):
             self._sel_start = pos
             self._sel_cur = pos
+            self._sel_highlight = []
             self.setFocus(); self.update()
             return
         if self._mode == "image":
@@ -319,6 +335,16 @@ class PageLabel(QLabel):
                 self.text_drag_done.emit(span, wr[0], wr[3])
 
     def contextMenuEvent(self, event):
+        if self._mode == "text":
+            self._text_context_menu(event); return
+        if self._mode == "select":
+            menu = QMenu(self)
+            a = menu.addAction("⧉  Kopyala\tCtrl+C")
+            a.setEnabled(bool(self._sel_highlight))
+            a.triggered.connect(lambda: self.copy_requested.emit("selection", None))
+            menu.addAction("Sayfadaki tüm metni seç\tCtrl+A").triggered.connect(
+                lambda: self.copy_requested.emit("page", None))
+            menu.exec(event.globalPos()); return
         if self._mode != "image":
             return
         hit = self._image_at(event.pos().x(), event.pos().y())
@@ -339,6 +365,22 @@ class PageLabel(QLabel):
         menu.addAction("🗑  Sil").triggered.connect(lambda: self.image_delete_req.emit(hit))
         menu.exec(event.globalPos())
 
+    def _text_context_menu(self, event):
+        span = self._span_at(event.pos().x(), event.pos().y())
+        menu = QMenu(self)
+        if span:
+            self._text_sel = span; self._text_drag_start = None; self.update()
+            preview = span["text"].replace("\xa0", " ").strip()
+            preview = preview if len(preview) <= 30 else preview[:29] + "…"
+            menu.addAction(f"⧉  Kopyala  \"{preview}\"\tCtrl+C").triggered.connect(
+                lambda: self.copy_requested.emit("span", span))
+            menu.addAction("Satırın tamamını kopyala").triggered.connect(
+                lambda: self.copy_requested.emit("line", span))
+            menu.addSeparator()
+        menu.addAction("Sayfadaki tüm metni kopyala").triggered.connect(
+            lambda: self.copy_requested.emit("page", None))
+        menu.exec(event.globalPos())
+
     def keyPressEvent(self, event):
         if self._mode == "image" and self._selected:
             if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
@@ -353,6 +395,9 @@ class PageLabel(QLabel):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if self._mode in ("select", "erase"):
+            if self._mode == "select" and self._sel_highlight:
+                for x0, y0, x1, y1 in self._sel_highlight:
+                    p.fillRect(QRectF(x0 - 1, y0, x1 - x0 + 2, y1 - y0), QColor(56, 132, 255, 70))
             if self._sel_start and self._sel_cur:
                 a, b = self._sel_start, self._sel_cur
                 r = QRectF(min(a.x(), b.x()), min(a.y(), b.y()),
@@ -640,6 +685,7 @@ class PDFViewerWidget(QWidget):
     text_select_done = pyqtSignal(tuple, int)
     area_erase_done  = pyqtSignal(tuple, int)
     image_align_req  = pyqtSignal(dict, str, int)
+    copy_requested   = pyqtSignal(str, object, int)
     ctrl_scroll      = pyqtSignal(int)
 
     def __init__(self):
@@ -698,6 +744,7 @@ class PDFViewerWidget(QWidget):
             lbl.text_select_done.connect(lambda wr, pg=p: self.text_select_done.emit(wr, pg))
             lbl.area_erase_done.connect(lambda wr, pg=p: self.area_erase_done.emit(wr, pg))
             lbl.image_align_req.connect(lambda img, k, pg=p: self.image_align_req.emit(img, k, pg))
+            lbl.copy_requested.connect(lambda k, s, pg=p: self.copy_requested.emit(k, s, pg))
 
             self._layout.addWidget(wrapper, alignment=Qt.AlignmentFlag.AlignHCenter)
             self._page_labels.append(lbl)
@@ -739,6 +786,14 @@ class PDFViewerWidget(QWidget):
             if w.pos().y() + w.height() > sv:
                 return i
         return len(self._wrappers) - 1
+
+    def selected_span(self) -> "tuple[int, dict] | None":
+        """Metin modunda tek tıkla seçili span → (sayfa, span)"""
+        for i, lbl in enumerate(self._page_labels):
+            s = lbl.get_text_selection()
+            if s:
+                return i, s
+        return None
 
     def center_page(self) -> int:
         """Ekranın dikey ortasındaki sayfa — kullanıcının o an baktığı sayfa"""
