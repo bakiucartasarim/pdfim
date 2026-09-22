@@ -486,6 +486,81 @@ class PDFEditor:
         except Exception:
             return False
 
+    # ── Sayfa işlemleri ───────────────────────────────────────────────────────
+    # Sayfa numaraları 0 tabanlı. Hepsi hata durumunda istisna fırlatır; çağıran (köprü)
+    # geri alma kopyasını geri atar ve mesajı gösterir.
+
+    def rotate_pages(self, pages: list, delta: int) -> list:
+        for p in pages:
+            page = self.doc[p]
+            page.set_rotation((page.rotation + delta) % 360)
+        self.modified = True
+        return sorted(pages)
+
+    def delete_pages(self, pages: list) -> list:
+        pages = sorted(set(pages))
+        if len(pages) >= len(self.doc):
+            raise ValueError("Belgenin tüm sayfaları silinemez; en az bir sayfa kalmalı.")
+        self.doc.delete_pages(pages)
+        self.modified = True
+        return []
+
+    def move_pages(self, pages: list, to: int) -> list:
+        """Seçili sayfaları (kendi sıralarıyla) `to` numaralı sayfanın önüne taşı
+        (to = sayfa sayısı → sona). Dönen: taşınan sayfaların yeni numaraları."""
+        n = len(self.doc)
+        moved = sorted(set(pages))
+        rest = [i for i in range(n) if i not in set(moved)]
+        pos = sum(1 for i in rest if i < to)
+        order = rest[:pos] + moved + rest[pos:]
+        if order != list(range(n)):
+            self.doc.select(order)
+            self.modified = True
+        return list(range(pos, pos + len(moved)))
+
+    def duplicate_pages(self, pages: list) -> list:
+        """Her sayfanın bağımsız bir kopyasını hemen arkasına ekle. Dönen: kopyaların numaraları."""
+        pages = sorted(set(pages))
+        for p in reversed(pages):                   # sondan başa: önceki numaralar kaymasın
+            to = p + 1 if p + 1 < len(self.doc) else -1
+            self.doc.fullcopy_page(p, to)
+        self.modified = True
+        return [p + i + 1 for i, p in enumerate(pages)]
+
+    def insert_blank_page(self, at: int, width: float, height: float) -> list:
+        at = at if 0 <= at < len(self.doc) else len(self.doc)
+        self.doc.new_page(pno=at if at < len(self.doc) else -1, width=width, height=height)
+        self.modified = True
+        return [at]
+
+    def insert_pdf_file(self, path: str, at: int) -> list:
+        """Başka bir PDF'in tüm sayfalarını `at` numaralı sayfanın önüne ekle."""
+        try:
+            src = fitz.open(path)
+        except Exception as e:
+            raise ValueError(f"Eklenecek dosya açılamadı.\n({e})")
+        try:
+            if src.needs_pass:
+                raise ValueError("Eklenecek PDF parola korumalı.")
+            at = at if 0 <= at < len(self.doc) else len(self.doc)
+            count = len(src)
+            self.doc.insert_pdf(src, start_at=at if at < len(self.doc) else -1)
+        finally:
+            src.close()
+        self.modified = True
+        return list(range(at, at + count))
+
+    def export_pages(self, pages: list, path: str) -> bool:
+        """Seçili sayfaları (belgedeki sırayla) yeni bir PDF olarak kaydet; açık belge değişmez."""
+        out = fitz.open()
+        try:
+            for p in sorted(set(pages)):
+                out.insert_pdf(self.doc, from_page=p, to_page=p)
+            out.save(path, garbage=3, deflate=True)
+        finally:
+            out.close()
+        return True
+
     # ── Kaydet / Kapat ────────────────────────────────────────────────────────
 
     def content_rect(self, page_num: int) -> tuple:

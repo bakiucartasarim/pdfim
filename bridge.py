@@ -104,6 +104,7 @@ class Api:
                 "canUndo": bool(self._undo),
                 "canRedo": bool(self._redo),
                 "pages": [[p.rect.width, p.rect.height] for p in ed.doc],
+                "rotations": [p.rotation for p in ed.doc],
                 "recent": self._recent,
             }
 
@@ -144,6 +145,93 @@ class Api:
             self._state.page_revs[page] += 1
         self._update_title()
         return {"ok": True, "state": self.get_state()}
+
+    def _mutate_doc(self, fn, *args) -> dict:
+        """Sayfa yapısını değiştiren işlemler (sırala, sil, ekle…): sayfa numaraları kaydığı için
+        tüm sürümler yenilenir. fn yeni seçilecek sayfa numaralarını döner → "pages"."""
+        with self._state.lock:
+            ed = self._ed
+            if not ed.doc:
+                return {"ok": False, "error": "Açık belge yok."}
+            self._snapshot()
+            try:
+                result = fn(*args)
+            except Exception as e:
+                self._undo.pop()
+                return {"ok": False, "error": str(e) or "İşlem uygulanamadı."}
+            ed.modified = True
+            self._reloaded()
+        return {"ok": True, "state": self.get_state(), "pages": result}
+
+    # ── Sayfalar modu ────────────────────────────────────────────────────────
+
+    def rotate_pages(self, pages: list, delta: int) -> dict:
+        return self._mutate_doc(self._ed.rotate_pages, [int(p) for p in pages], int(delta))
+
+    def delete_pages(self, pages: list) -> dict:
+        return self._mutate_doc(self._ed.delete_pages, [int(p) for p in pages])
+
+    def move_pages(self, pages: list, to: int) -> dict:
+        return self._mutate_doc(self._ed.move_pages, [int(p) for p in pages], int(to))
+
+    def duplicate_pages(self, pages: list) -> dict:
+        return self._mutate_doc(self._ed.duplicate_pages, [int(p) for p in pages])
+
+    def insert_blank_page(self, at: int) -> dict:
+        """Boş sayfa: bir önceki sayfanın boyutunda (yoksa A4)"""
+        with self._state.lock:
+            ed = self._ed
+            ref = ed.doc[min(max(at - 1, 0), ed.page_count() - 1)].rect if ed.doc else None
+        w, h = (ref.width, ref.height) if ref else (595, 842)
+        return self._mutate_doc(ed.insert_blank_page, int(at), w, h)
+
+    def insert_pdf_dialog(self, at: int) -> dict | None:
+        paths = self._window.create_file_dialog(
+            webview.FileDialog.OPEN, allow_multiple=True, file_types=_PDF_TYPES)
+        if not paths:
+            return None
+        return self.insert_pdf_paths(list(paths), at)
+
+    def insert_pdf_paths(self, paths: list, at: int) -> dict:
+        """Sürükle-bırak ya da dosya penceresi: PDF'leri sırayla `at` konumuna ekle (tek geri alma adımı)"""
+        def insert_all():
+            pos, added = int(at), []
+            for p in paths:
+                pages = self._ed.insert_pdf_file(p, pos)
+                added += pages
+                pos = pages[-1] + 1 if pages else pos
+            return added
+        return self._mutate_doc(insert_all)
+
+    def export_pages_dialog(self, pages: list) -> dict | None:
+        ed = self._ed
+        if not ed.doc or not pages:
+            return {"ok": False, "error": "Önce sayfa seçin."}
+        stem = os.path.splitext(os.path.basename(ed.path) or "belge")[0]
+        pages = sorted(int(p) for p in pages)
+        suffix = f"s{pages[0] + 1}" if len(pages) == 1 else f"{len(pages)}_sayfa"
+        target = self._window.create_file_dialog(
+            webview.FileDialog.SAVE, directory=os.path.dirname(ed.path),
+            save_filename=f"{stem}_{suffix}.pdf", file_types=_PDF_TYPES)
+        if not target:
+            return None
+        target = target if isinstance(target, str) else target[0]
+        if not target.lower().endswith(".pdf"):
+            target += ".pdf"
+        if os.path.abspath(target) == os.path.abspath(ed.path):
+            return {"ok": False, "error": "Açık belgenin üzerine yazılamaz; başka bir ad seçin."}
+        try:
+            with self._state.lock:
+                ed.export_pages(pages, target)
+        except Exception as e:
+            return {"ok": False, "error": f"Kaydedilemedi.\n({e})"}
+        return {"ok": True, "path": target, "count": len(pages)}
+
+    def open_dropped(self, path: str) -> dict | None:
+        """Pencereye bırakılan PDF (Düzenle modu): kaydedilmemiş değişiklik varsa sorar"""
+        if not self._confirm_discard():
+            return None
+        return self.open_path(path)
 
     # ── Dosya ────────────────────────────────────────────────────────────────
 

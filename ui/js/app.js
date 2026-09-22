@@ -40,6 +40,7 @@ function applyState(state) {
     return;
   }
   const rebuild = !prev || prev.gen !== doc.gen || prev.pages.length !== doc.pages.length;
+  if (rebuild && (!prev || prev.path !== doc.path || app.freshOpen)) app.pageSel = new Set();
   if (rebuild) {
     // Yeni belge → en baştan, genişliğe sığdırarak.
     // Aynı belge yeniden yüklendi (geri al / yinele) → kaydırma konumu ve sayfa korunur.
@@ -61,6 +62,7 @@ function applyState(state) {
     // Yalnız değişen sayfaların görüntüsü ve kutuları yenilenir
     doc.versions.forEach((v, i) => { if (v !== prev.versions[i]) refreshPage(i); });
   }
+  if (app.mode === 'sayfalar') buildGrid();
   updatePageCounter();
 }
 
@@ -312,6 +314,7 @@ function paperName(wPt, hPt) {
 
 function updateStatus() {
   let hint = TOOL_HINTS[app.tool];
+  if (app.mode === 'sayfalar') hint = 'Sürükleyerek sıralayın · Ctrl/Shift ile çoklu seçim · Çift tık: düzenle';
   if (app.placing) hint = 'Yapıştırılacak yere tıklayın · Metin kenarlarına yapışır · Esc: vazgeç';
   else if (isEditing()) hint = 'Enter: uygula · Esc: vazgeç';
   const parts = [hint];
@@ -389,11 +392,21 @@ async function usePasteInfo(info) {
   }
 }
 
+const READY_MODES = new Set(['duzenle', 'sayfalar']);
+
 function setMode(mode) {
+  if (!READY_MODES.has(mode)) {
+    toast(`${MODE_NAMES[mode]} modülü sonraki aşamada gelecek`);
+    return;
+  }
+  if (mode === app.mode) return;
+  const prev = app.mode;
   app.mode = mode;
   document.querySelectorAll('#mode-tabs [data-mode]').forEach((b) =>
     b.classList.toggle('is-active', b.dataset.mode === mode));
-  if (mode !== 'duzenle') toast(`${MODE_NAMES[mode]} modülü sonraki aşamada gelecek`);
+  if (mode === 'sayfalar') enterPagesMode();
+  else if (prev === 'sayfalar') leavePagesMode();
+  renderInspector();
   updateStatus();
 }
 
@@ -470,14 +483,21 @@ function bind() {
 
   document.addEventListener('keydown', onKey);
   bindFormatBar();
+  bindPageGrid();
 }
 
 const TOOL_KEYS = { 1: 'secim', 2: 'metin', 3: 'metin-sec', 4: 'alan-sil' };
 
 function onKey(e) {
-  const inField = e.target.matches('input, textarea, select, [contenteditable="true"]');
+  // Olay document'e gelmiş olabilir (öğe değil) → matches yok
+  const inField = e.target instanceof Element && e.target.matches('input, textarea, select, [contenteditable="true"]');
   const key = e.key.toLowerCase();
   let handled = true;
+  // Sayfalar modunun kendi tuşları (Del, Esc, Ctrl+A, Ctrl+D); geri kalanı (Ctrl+Z…) aşağıda
+  if (app.mode === 'sayfalar' && app.doc && !inField && onPagesKey(e, key)) {
+    e.preventDefault();
+    return;
+  }
   if (e.ctrlKey && key === 'o') commands.open();
   else if (e.ctrlKey && key === 's' && e.shiftKey) commands.saveAs();
   else if (e.ctrlKey && key === 's') commands.save();

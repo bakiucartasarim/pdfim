@@ -63,8 +63,9 @@ def main():
         files = e.get("dataTransfer", {}).get("files", [])
         pdfs = [f.get("pywebviewFullPath") for f in files
                 if f.get("pywebviewFullPath", "").lower().endswith(".pdf")]
-        if pdfs and api._confirm_discard():
-            push(api.open_path(pdfs[0]))
+        # Ne yapılacağına arayüz karar verir: Sayfalar modunda araya ekle, yoksa aç
+        if pdfs:
+            window.evaluate_js(f"window.app && app.onDropFiles({json.dumps(pdfs)})")
 
     argv_pdf = [a for a in sys.argv[1:2] if a.lower().endswith(".pdf")]
 

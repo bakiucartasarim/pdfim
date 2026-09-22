@@ -10,6 +10,7 @@ function renderInspector() {
     body.append(note('Bir PDF açın.'));
     return;
   }
+  if (app.mode === 'sayfalar') return renderPagesInspector(body);
   if (!sel) {
     const [w, h] = app.doc.pages[app.current];
     body.append(
@@ -63,6 +64,48 @@ function renderInspector() {
       actions([btn('delete', 'Resmi sil', () => deleteImage(sel.page, it), false, true)]),
     );
   }
+}
+
+/** Sayfalar modu: seçim, işlemler, hızlı seçim, belge bilgisi */
+function renderPagesInspector(body) {
+  const sel = [...app.pageSel].sort((a, b) => a - b), n = app.doc.pages.length;
+  const chips = document.createElement('div');
+  chips.className = 'chip-list';
+  for (const p of sel.slice(0, 24)) {
+    const c = document.createElement('span');
+    c.className = 'chip';
+    c.textContent = p + 1;
+    chips.append(c);
+  }
+  if (sel.length > 24) chips.append(Object.assign(document.createElement('span'), { className: 'chip', textContent: `+${sel.length - 24}` }));
+
+  const quick = document.createElement('div');
+  quick.className = 'quick-grid';
+  for (const [label, kind] of [['Tümü', 'all'], ['Hiçbiri', 'none'], ['Tek sayfalar', 'odd'], ['Çift sayfalar', 'even']]) {
+    quick.append(btn('', label, () => quickSelect(kind)));
+  }
+
+  const ops = [
+    btn('file_export', 'Ayrı PDF kaydet', () => pageActions.export(), true),
+    btn('library_add', 'Çoğalt', () => pageActions.duplicate()),
+    btn('rotate_right', 'Döndür', () => pageActions['rotate-right']()),
+    btn('delete', 'Sil', () => pageActions.delete(), false, true),
+  ];
+  ops.forEach((b) => { b.disabled = !sel.length; });
+
+  body.append(
+    section('Sayfa işlemleri', sel.length
+      ? [row('Seçili', `${sel.length} sayfa`), chips]
+      : [note('Sayfalara tıklayarak seçin · Ctrl: ekle · Shift: aralık')]),
+    actions(ops),
+    section('Hızlı seçim', [quick]),
+    section('Belge', [
+      row('Dosya', app.doc.name),
+      row('Sayfa sayısı', String(n)),
+      row('Kaydedilmemiş değişiklik', app.doc.modified ? 'Var' : 'Yok'),
+    ]),
+    note('Sürükleyerek sıralayın · Explorer\'dan PDF bırakınca mavi çizginin olduğu yere eklenir · Çift tık: sayfayı düzenle'),
+  );
 }
 
 /* ── Küçük yapı taşları ───────────────────────────────────────────────────── */
