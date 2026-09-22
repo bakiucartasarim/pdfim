@@ -80,6 +80,7 @@ QToolButton:hover   { background: #313244; }
 QToolButton:pressed { background: #45475a; }
 QToolButton:checked { background: #2a2a4a; border: 1px solid #6366f1; color: #89b4fa; }
 QToolButton:disabled { color: #45475a; }
+QToolBar[compact="true"] QToolButton { padding: 5px 6px; min-width: 20px; }
 
 QStatusBar {
     background: #13131f;
@@ -378,11 +379,32 @@ class MainWindow(QMainWindow):
         tb.setIconSize(QSize(16, 16))
         tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.addToolBar(tb)
+        self._tb = tb
+        self._tb_labels: list[tuple] = []      # (action, tam etiket, kademe) — dar pencerede kısaltmak için
+        self._tb_widths: dict[int, int] = {}   # sıkıştırma kademesi → araç çubuğu genişliği
+        self._tb_level = 0
 
-        def act(label, shortcut=None, slot=None, checkable=False, enabled=True):
+        # Menüde zaten tanımlı kısayollar. Aynı kısayol iki QAction'da olunca Qt onu
+        # "belirsiz" sayar ve HİÇBİRİNİ tetiklemez — v1.0'dan beri Ctrl+S, Ctrl+Z,
+        # Ctrl+O … bu yüzden çalışmıyordu. Toolbar'da sadece ipucunda gösteriyoruz.
+        taken = {a.shortcut().toString() for a in self.findChildren(QAction)
+                 if not a.shortcut().isEmpty()}
+
+        # level: pencere daralınca bu düğmenin yazısı hangi kademede gizlenir
+        #   1 = ilk (dosya/geri al gibi ikonu tanıdık olanlar), 2 = en son (mod düğmeleri)
+        def act(label, shortcut=None, slot=None, checkable=False, enabled=True, tip=None, level=1):
             a = QAction(label, self)
+            name = label.split("  ")[-1]
             if shortcut:
-                a.setShortcut(QKeySequence(shortcut))
+                ks = QKeySequence(shortcut)
+                if ks.toString() not in taken:
+                    a.setShortcut(ks)
+                    taken.add(ks.toString())
+                a.setToolTip(f"{tip or name}  ({ks.toString(QKeySequence.SequenceFormat.NativeText)})")
+            else:
+                a.setToolTip(tip or name)
+            if "  " in label:
+                self._tb_labels.append((a, label, level))
             if slot:
                 a.triggered.connect(slot)
             if checkable:
@@ -401,6 +423,8 @@ class MainWindow(QMainWindow):
         # Undo / Redo
         self.act_undo_tb = act("↩  Geri",  "Ctrl+Z", self._undo,  enabled=False)
         self.act_redo_tb = act("↪  İleri", "Ctrl+Y", self._redo,  enabled=False)
+        self.act_copy_tb = act("📋  Kopyala", "Ctrl+C", self._copy_current, enabled=False,
+                               tip="Kopyala — tıklanan metni ya da seçili alanı panoya alır")
 
         tb.addSeparator()
 
@@ -437,13 +461,13 @@ class MainWindow(QMainWindow):
 
         # Mod
         self.act_text_tb = act("✏  Metin",  "Ctrl+1",
-                                lambda: self._set_mode("text"), checkable=True)
+                                lambda: self._set_mode("text"), checkable=True, level=2)
         self.act_img_tb  = act("🖼  Resim",  "Ctrl+2",
-                                lambda: self._set_mode("image"), checkable=True)
+                                lambda: self._set_mode("image"), checkable=True, level=2)
         self.act_sel_tb  = act("⧉  Metin Seç", "Ctrl+3",
-                                lambda: self._set_mode("select"), checkable=True)
+                                lambda: self._set_mode("select"), checkable=True, level=2)
         self.act_erase_tb = act("🩹  Alan Sil", "Ctrl+4",
-                                lambda: self._set_mode("erase"), checkable=True)
+                                lambda: self._set_mode("erase"), checkable=True, level=2)
         self.act_text_tb.setChecked(True)
 
         tb.addSeparator()
@@ -556,7 +580,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"PDFim — {name}")
         for a in (self.act_save, self.act_save_tb, self.act_saveas, self.act_saveas_tb,
-                  self.act_copy, self.act_select_all):
+                  self.act_copy, self.act_select_all, self.act_copy_tb):
             a.setEnabled(True)
 
         # Undo/redo sıfırla
@@ -1109,12 +1133,45 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "PDFim Hakkında",
             "<h2 style='color:#cdd6f4; margin:0'>PDFim</h2>"
-            "<p style='color:#a6adc8'>Sürüm 1.3  —  PDF Editörü</p>"
+            "<p style='color:#a6adc8'>Sürüm 1.4  —  PDF Editörü</p>"
             "<p style='color:#6c7086; font-size:12px'>"
             "PyMuPDF + PyQt6 ile geliştirildi.<br>"
             "Metin düzenleme · Biçim çubuğu · Metin kopyalama · Resim hizalama · Orijinal font desteği"
             "</p>",
         )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_toolbar_density()
+
+    def _set_toolbar_level(self, level: int):
+        """0 = tüm yazılar, 1 = dosya/düzen düğmeleri sadece ikon, 2 = hepsi ikon + dar boşluk"""
+        for a, label, lvl in self._tb_labels:
+            a.setText(label.split("  ")[0] if level >= lvl else label)
+        compact = "true" if level >= 2 else "false"
+        if self._tb.property("compact") != compact:
+            self._tb.setProperty("compact", compact)
+            for w in self._tb.findChildren(QWidget):   # stylesheet'teki [compact] seçicisi yeniden uygulansın
+                w.style().unpolish(w); w.style().polish(w)
+        self._tb_level = level
+
+    def _apply_toolbar_density(self):
+        """Pencere daraldıkça önce ikincil düğmelerin, sonra mod düğmelerinin yazısını gizle.
+        Qt aksi hâlde yazıları "…det" gibi kırpıyordu; tam ad ipucunda (tooltip) kalır."""
+        if not getattr(self, "_tb_labels", None) or not self.isVisible():
+            return
+        if not self._tb_widths:                   # her kademenin genişliğini bir kez ölç
+            for level in (0, 1, 2):
+                self._set_toolbar_level(level)
+                self._tb_widths[level] = self._tb.sizeHint().width()
+        avail = self.width() - 12
+        level = next((lv for lv in (0, 1) if self._tb_widths[lv] <= avail), 2)
+        if level != self._tb_level or not self._tb.property("compact"):
+            self._set_toolbar_level(level)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_toolbar_density()
 
     def closeEvent(self, event):
         # Kayıt başarısız olursa pencere açık kalır — eskiden hata mesajından

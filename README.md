@@ -40,8 +40,8 @@ Bir metin düzenlenirken üstteki ikinci satır etkinleşir:
 
 ![Tablo seçip kopyalama](docs/metin-kopyalama.png)
 
-- **Metin modunda:** bir metne tıklayıp **Ctrl+C**'ye basın ya da **sağ tıklayın** → *Kopyala*,
-  *Satırın tamamını kopyala*, *Sayfadaki tüm metni kopyala*.
+- **Metin modunda:** bir metne tıklayıp araç çubuğundaki **📋 Kopyala** düğmesine ya da **Ctrl+C**'ye
+  basın. **Sağ tık** menüsünde *Kopyala*, *Satırın tamamını kopyala* ve *Sayfadaki tüm metni kopyala* var.
 - **Metin Seç modunda (Ctrl+3):** bir alanı sürükleyerek seçin; seçilen kelimeler vurgulanır ve
   otomatik kopyalanır. **Ctrl+A** ekrandaki sayfanın tamamını seçer.
 - Tablolar sütunlar arasında **Tab** karakteriyle kopyalanır; Excel'e yapıştırınca hücrelere dağılır.
@@ -56,6 +56,7 @@ Bir metin düzenlenirken üstteki ikinci satır etkinleşir:
 ### Diğer
 - **Alan Sil (Ctrl+4):** seçilen alanın üzeri beyazla kapatılır.
 - Geri al / yinele (son 20 işlem), son açılan dosyalar, sayfa küçük resimleri.
+- Pencere daraldığında araç çubuğu düğmeleri sadece ikon gösterir; üzerine gelince adı ve kısayolu görünür.
 - Güvenli kayıt: kayıt yarıda kesilirse orijinal dosya bozulmaz. Dosya başka bir programda
   (ör. Adobe) açıksa bunu söyler ve *Farklı Kaydet* önerir.
 
