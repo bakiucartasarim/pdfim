@@ -161,6 +161,8 @@ Web sürümünün ayarları ortam değişkenleriyle yapılır:
 | `PDFIM_MAX_SESSIONS` | 100 | Aynı anda açık oturum |
 | `PDFIM_IDLE_MINUTES` | 60 | Hareketsiz oturum bu süre sonra silinir |
 | `PDFIM_SOURCE_URL` | bu depo | Arayüzdeki "Kaynak kod" bağlantısı (AGPL gereği) |
+| `PDFIM_NOTICE` | boş | Doluysa üst çubukta "TEST" rozeti ve açılış ekranında bu uyarı (herkese açık deneme kurulumu için) |
+| `PDFIM_SELFHOST_URL` | README'deki bu bölüm | "Kendi sunucunda çalıştır" bağlantısı |
 
 Oturumlar bellekte tutulduğu için sunucu **tek süreç** çalışmalıdır (birden çok uvicorn işçisi kullanmayın).
 

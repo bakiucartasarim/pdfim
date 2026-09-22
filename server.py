@@ -35,6 +35,9 @@ UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
 DATA_DIR = os.environ.get("PDFIM_DATA_DIR") or os.path.join(tempfile.gettempdir(), "pdfim-web")
 SOURCE_URL = os.environ.get("PDFIM_SOURCE_URL", "https://github.com/bakiucartasarim/pdfim")
 DESKTOP_URL = os.environ.get("PDFIM_DESKTOP_URL", "https://github.com/bakiucartasarim/pdfim/releases/latest")
+SELFHOST_URL = os.environ.get("PDFIM_SELFHOST_URL", SOURCE_URL + "/tree/v2-webview#v2-geliştiriliyor--v2-webview-dalı")
+# Herkese açık deneme kurulumunda üst çubukta "TEST" rozeti ve açıklama; kendi sunucusunda boş bırakılır
+NOTICE = os.environ.get("PDFIM_NOTICE", "")
 MAX_UPLOAD = int(os.environ.get("PDFIM_MAX_UPLOAD_MB", "50")) * 1024 * 1024
 MAX_PAGES = int(os.environ.get("PDFIM_MAX_PAGES", "500"))
 MAX_SESSIONS = int(os.environ.get("PDFIM_MAX_SESSIONS", "100"))
@@ -176,6 +179,7 @@ def root():
 def config(request: Request):
     s, new = _session(request)
     r = JSONResponse({"web": True, "sourceUrl": SOURCE_URL, "desktopUrl": DESKTOP_URL,
+                      "selfhostUrl": SELFHOST_URL, "notice": NOTICE,
                       "maxUploadMb": MAX_UPLOAD // (1024 * 1024), "maxPages": MAX_PAGES,
                       "idleMinutes": IDLE_SECONDS // 60})
     _set_cookie(request, r, s)

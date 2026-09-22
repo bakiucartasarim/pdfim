@@ -141,6 +141,14 @@ async function initWeb() {
   $('link-source').href = cfg.sourceUrl;
   $('link-source-top').href = cfg.sourceUrl;
   $('link-desktop').href = cfg.desktopUrl;
+  $('link-selfhost').href = cfg.selfhostUrl;
+  if (cfg.notice) {                          // herkese açık deneme kurulumu
+    $('web-notice').textContent = cfg.notice;
+    $('test-badge').hidden = false;
+    $('test-badge').title = cfg.notice;
+  } else {
+    $('web-notice').remove();
+  }
 
   // Sürükle-bırak (masaüstünde bunu pywebview yapıyor)
   document.addEventListener('dragover', (e) => e.preventDefault());
