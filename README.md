@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/pdfim_logo.png" width="128" alt="PDFim logosu"></p>
+
 # PDFim
 
 Windows için hafif bir PDF düzenleyici. Datasheet gibi teknik belgelerde küçük revizyonları

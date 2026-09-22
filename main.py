@@ -1269,15 +1269,18 @@ class MainWindow(QMainWindow):
         self.editor.modified = True
 
     def _show_about(self):
-        QMessageBox.about(
-            self, "PDFim Hakkında",
+        box = QMessageBox(self)
+        box.setWindowTitle("PDFim Hakkında")
+        box.setIconPixmap(QApplication.windowIcon().pixmap(96, 96))
+        box.setText(
             "<h2 style='color:#cdd6f4; margin:0'>PDFim</h2>"
-            "<p style='color:#a6adc8'>Sürüm 1.6  —  PDF Editörü</p>"
+            "<p style='color:#a6adc8'>Sürüm 1.7  —  PDF Editörü</p>"
             "<p style='color:#6c7086; font-size:12px'>"
             "PyMuPDF + PyQt6 ile geliştirildi.<br>"
             "Metin düzenleme · Biçim çubuğu · Kopyala-yapıştır · Resim hizalama · Orijinal font desteği"
-            "</p>",
+            "</p>"
         )
+        box.exec()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -1343,10 +1346,24 @@ def _setup_crash_handler():
     sys.excepthook = handler
 
 
+def _resource(name: str) -> str:
+    """PyInstaller paketinde (_MEIPASS) ya da kaynak klasörde bir dosyanın yolu"""
+    return os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), name)
+
+
 def main():
     _setup_crash_handler()
+    if sys.platform == "win32":
+        # Kendi AppUserModelID'si olmazsa Windows görev çubuğunda Python'un ikonunu
+        # gösterir ve pencereleri python.exe altında gruplar (kaynaktan çalıştırınca)
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("PDFim.Editor")
+        except Exception:
+            pass
     app = QApplication(sys.argv)
     app.setApplicationName("PDFim")
+    app.setWindowIcon(QIcon(_resource("pdfim.ico")))   # başlık çubuğu, görev çubuğu, Hakkında
     app.setStyle("Fusion")
     app.setStyleSheet(APP_STYLE)
 
