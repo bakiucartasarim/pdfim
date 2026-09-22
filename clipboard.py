@@ -41,13 +41,14 @@ _CF_PNG = _user32.RegisterClipboardFormatW("PNG")   # Ekran Alıntısı Aracı, 
 
 
 class _Open:
-    """Pano başka bir programda kısa süre açık olabilir (ör. kopyalayan program) → birkaç kez dene."""
+    """Pano başka bir programda kısa süre açık olabilir (kopyalayan program, pano geçmişi,
+    Office) → ~1 sn boyunca tekrar dene."""
 
     def __enter__(self):
-        for _ in range(20):
+        for _ in range(50):
             if _user32.OpenClipboard(None):
                 return self
-            time.sleep(0.01)
+            time.sleep(0.02)
         raise OSError("Pano başka bir program tarafından kullanılıyor.")
 
     def __exit__(self, *exc):
@@ -100,6 +101,15 @@ def set_text(text: str) -> bool:
         pass
     _kernel32.GlobalFree(h)
     return False
+
+
+def is_locked() -> bool:
+    """Pano şu an başka bir programda açık mı (okuma boş döndüğünde nedenini ayırt etmek için)"""
+    try:
+        with _Open():
+            return False
+    except OSError:
+        return True
 
 
 def has_image() -> bool:

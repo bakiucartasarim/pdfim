@@ -263,7 +263,7 @@ class Api:
         if not text:
             return {"ok": False, "error": "Kopyalanacak metin yok."}
         if not clipboard.set_text(text):
-            return {"ok": False, "error": "Panoya yazılamadı."}
+            return {"ok": False, "error": "Panoya yazılamadı — pano başka bir programda açık, biraz sonra tekrar deneyin."}
         self._last_copied, self._last_style = text, style
         return {"ok": True, "text": text}
 
@@ -298,7 +298,7 @@ class Api:
             return {"kind": "image"}
         txt = clipboard.get_text()
         if not txt.strip():
-            return {"kind": None}
+            return {"kind": None, "locked": clipboard.is_locked()}
         style = self._paste_style(txt)
         sp = {**PDFEditor.DEFAULT_TEXT_STYLE, **(style or {})}
         return {"kind": "text", "text": txt, "fromPdfim": style is not None,

@@ -365,7 +365,8 @@ const commands = {
     } else if (info.kind === 'text') {
       startPlacement(info);
     } else {
-      toast('Panoda yapıştırılacak metin veya resim yok.');
+      toast(info.locked ? 'Pano başka bir programda açık — biraz sonra tekrar deneyin.'
+                        : 'Panoda yapıştırılacak metin veya resim yok.');
     }
   },
   selectAll() { if (app.doc) selectPageText(app.current); },
