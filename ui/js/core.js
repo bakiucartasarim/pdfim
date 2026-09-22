@@ -25,6 +25,7 @@ const app = window.app = {
   hover: null,        // { page, rect, kind } — imlecin altındaki öğe
   highlight: null,    // { page, rects, rect } — Metin Seç ile seçilen kelimeler
   placing: null,      // yapıştırma önizlemesi { info, pos }
+  pending: new Map(), // sayfa → { version, els } — yeni görüntü gelene kadar gösterilen düzenleme
   drag: null,
 };
 

@@ -121,6 +121,7 @@ function buildPages() {
   pages.replaceChildren();
   thumbs.replaceChildren();
   app.pageEls = [];
+  app.pending.clear();       // geçici katmanlar eski sayfa öğeleriyle birlikte gitti
   app.thumbEls = [];
   pageObserver.disconnect();
   thumbObserver.disconnect();
@@ -136,6 +137,7 @@ function buildPages() {
     const img = document.createElement('img');
     img.alt = `Sayfa ${i + 1}`;
     img.draggable = false;
+    img.addEventListener('load', () => onPageImageLoad(i, img));
     const layer = document.createElement('div');
     layer.className = 'layer';
     bindLayer(layer, i);

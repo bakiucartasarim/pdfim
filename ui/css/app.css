@@ -555,6 +555,10 @@ body:not(.has-doc) #status-pill { display: none; }
 .marquee.is-erase { background: rgba(239, 68, 68, 0.12); outline: 1px dashed var(--danger); }
 
 .place-ghost { white-space: pre; opacity: 0.55; }
+
+/* Düzenleme uygulanırken yeni görüntü gelene kadar (editbox.js showPending) */
+.pending-cover { position: absolute; background: #fff; pointer-events: none; }
+.pending-text { position: absolute; white-space: pre; overflow: visible; pointer-events: none; }
 .place-base { width: 46px; border-top: 1px dashed #f59e0b; }
 
 /* ── Metin düzenleme kutusu (editbox.js) ─────────────────────────────────── */

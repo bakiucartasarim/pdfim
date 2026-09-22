@@ -116,18 +116,73 @@ function finishEdit(commit) {
   if (!commit) return;
 
   const text = e.input.value;
+  let call, msg;
   if (e.span) {
     const styled = !sameFmt(e.fmt, e.initial);
     if (text === e.span.text && !styled) return;
-    mutate(() => api().replace_text(e.page, e.span, text, styled ? e.fmt : null), 'Metin güncellendi');
+    if (!text.trim()) return mutate(() => api().replace_text(e.page, e.span, text, null));   // hata mesajı için
+    call = () => api().replace_text(e.page, e.span, text, styled ? e.fmt : null);
+    msg = 'Metin güncellendi';
   } else {
     if (!text.trim()) return;
     app.newTextFmt = { ...e.fmt };          // sonraki yeni metin aynı biçimle başlasın
     // Kutunun üst kenarı tıklanan nokta; PDF'e taban çizgisi verilir
     const base = e.at[1] + e.fmt.size * 0.8;
     const st = { ...e.fmt, font: e.fmt.family || 'Arial' };
-    mutate(() => api().insert_text(e.page, e.at[0], base, text, st), 'Metin eklendi');
+    call = () => api().insert_text(e.page, e.at[0], base, text, st);
+    msg = 'Metin eklendi';
   }
+  showPending(e, text);
+  mutate(call, msg).then((r) => { if (!r) clearPending(e.page); });
+}
+
+/* ── Anında gösterim ──────────────────────────────────────────────────────────
+ * Enter'dan sonra yeni sayfa görüntüsü ~150 ms sonra gelir; o arada eski metin görünüp
+ * yenisine "sıçrıyordu". Yeni görüntü yüklenene kadar eski metnin üstü beyazla örtülür ve
+ * yeni metin aynı biçimle gösterilir (app.js: sayfa görüntüsü yüklenince clearPending). */
+
+function showPending(e, text) {
+  const layer = app.pageEls[e.page] && app.pageEls[e.page].querySelector('.layer');
+  if (!layer) return;
+  const kk = k(), f = e.fmt, els = [];
+  const r = e.span ? e.span.rect : [e.at[0], e.at[1], e.at[0], e.at[1] + f.size * 1.25];
+  if (e.span) {
+    // Yalnız eski metnin kutusu örtülür (düzenleme kutusu en az 80 px; yandaki hücreler kaybolmasın)
+    const cover = boxEl('pending-cover', [r[0] - 1, r[1] - 1, r[2] + 1, r[3] + 1]);
+    els.push(cover);
+  }
+  const t = document.createElement('div');
+  t.className = 'pending-text';
+  t.textContent = text;
+  Object.assign(t.style, {
+    left: `${r[0] * kk}px`, top: `${r[1] * kk}px`,
+    width: `${(r[2] - r[0]) * kk}px`, height: `${(r[3] - r[1]) * kk}px`,
+    lineHeight: `${(r[3] - r[1]) * kk}px`,
+    fontFamily: `"${f.family || (e.span && e.span.family) || 'Arial'}", Arial, sans-serif`,
+    fontSize: `${f.size * kk}px`, fontWeight: f.bold ? 700 : 400, fontStyle: f.italic ? 'italic' : 'normal',
+    textDecoration: f.underline ? 'underline' : 'none', color: hex(f.color),
+    textAlign: e.span ? f.align : 'left',
+  });
+  els.push(t);
+  els.forEach((el) => layer.append(el));
+  clearPending(e.page);
+  const entry = { version: app.doc.versions[e.page], els };
+  app.pending.set(e.page, entry);
+  // Görüntü hiç gelmezse (sayfa ekrandan çıktı, istek düştü) kalıcı hayalet kalmasın
+  setTimeout(() => { if (app.pending.get(e.page) === entry) clearPending(e.page); }, 5000);
+}
+
+function clearPending(page) {
+  const p = app.pending.get(page);
+  if (!p) return;
+  p.els.forEach((el) => el.remove());
+  app.pending.delete(page);
+}
+
+/** Sayfa görüntüsü yüklendi: düzenlemeden *sonraki* sürümse geçici katman kalkar */
+function onPageImageLoad(page, img) {
+  const p = app.pending.get(page);
+  if (p && img.dataset.key && !img.dataset.key.startsWith(`${p.version}:`)) clearPending(page);
 }
 
 function onEditKey(e) {
