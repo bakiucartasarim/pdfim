@@ -315,7 +315,9 @@ function paperName(wPt, hPt) {
 function updateStatus() {
   let hint = TOOL_HINTS[app.tool];
   if (app.mode === 'sayfalar') hint = 'Sürükleyerek sıralayın · Ctrl/Shift ile çoklu seçim · Çift tık: düzenle';
-  if (app.placing) hint = 'Yapıştırılacak yere tıklayın · Metin kenarlarına yapışır · Esc: vazgeç';
+  if (app.mode === 'form') hint = formHint();
+  if (app.placing) hint = app.placing.kind === 'image' ? 'İmzanın ortası tıkladığınız yere gelir · Esc: vazgeç'
+    : 'Yerleştirilecek yere tıklayın · Metin kenarlarına yapışır · Esc: vazgeç';
   else if (isEditing()) hint = 'Enter: uygula · Esc: vazgeç';
   const parts = [hint];
   if (app.doc) parts.push(paperName(...app.doc.pages[app.current]));
@@ -392,7 +394,7 @@ async function usePasteInfo(info) {
   }
 }
 
-const READY_MODES = new Set(['duzenle', 'sayfalar']);
+const READY_MODES = new Set(['duzenle', 'sayfalar', 'form']);
 
 function setMode(mode) {
   if (!READY_MODES.has(mode)) {
@@ -404,8 +406,13 @@ function setMode(mode) {
   app.mode = mode;
   document.querySelectorAll('#mode-tabs [data-mode]').forEach((b) =>
     b.classList.toggle('is-active', b.dataset.mode === mode));
+  commitOpenEdit();
+  endPlacement();
   if (mode === 'sayfalar') enterPagesMode();
   else if (prev === 'sayfalar') leavePagesMode();
+  document.body.classList.toggle('mode-form', mode === 'form');
+  if (mode === 'form') { clearTransient(); renderAllLayers(); }
+  else if (prev === 'form') renderAllLayers();       // alan kutuları kalksın
   renderInspector();
   updateStatus();
 }
@@ -484,6 +491,8 @@ function bind() {
   document.addEventListener('keydown', onKey);
   bindFormatBar();
   bindPageGrid();
+  bindForm();
+  bindSignature();
 }
 
 const TOOL_KEYS = { 1: 'secim', 2: 'metin', 3: 'metin-sec', 4: 'alan-sil' };

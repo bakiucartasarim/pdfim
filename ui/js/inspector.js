@@ -11,6 +11,7 @@ function renderInspector() {
     return;
   }
   if (app.mode === 'sayfalar') return renderPagesInspector(body);
+  if (app.mode === 'form') return renderFormInspector(body);
   if (!sel) {
     const [w, h] = app.doc.pages[app.current];
     body.append(

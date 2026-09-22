@@ -7,11 +7,14 @@ Koordinatlar her zaman PDF noktası (pt, 1/72 inç) cinsindendir; ekran pikselin
 arayüzün işi. Böylece yakınlaştırma Python tarafını hiç ilgilendirmez.
 """
 
+import base64
+import binascii
 import functools
 import json
 import os
 import tempfile
 import threading
+import time
 
 import fitz
 import webview
@@ -25,6 +28,8 @@ MAX_RECENT = 10
 MAX_RENDER_PIXELS = 40_000_000   # ≈ 160 MB RGBA; 4K ekranda A4 %400'ün rahatça üstünde
 APPDATA_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "PDFim")
 _RECENT_PATH = os.path.join(APPDATA_DIR, "recent.json")
+_SIGN_DIR = os.path.join(APPDATA_DIR, "imzalar")
+MAX_SIGNATURES = 12
 _PDF_TYPES = ("PDF dosyaları (*.pdf)",)
 _IMAGE_TYPES = ("Resim dosyaları (*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff)",)
 _SPAN_KEYS = ("text", "origin", "size", "color", "font", "flags")
@@ -227,6 +232,70 @@ class Api:
             return {"ok": False, "error": f"Kaydedilemedi.\n({e})"}
         return {"ok": True, "path": target, "count": len(pages)}
 
+    # ── Form & İmza ──────────────────────────────────────────────────────────
+
+    def set_field(self, page: int, xref: int, value) -> dict:
+        return self._mutate(page, self._ed.set_field, page, int(xref), value)
+
+    def flatten_forms(self) -> dict:
+        return self._mutate_doc(self._ed.flatten_forms)
+
+    def place_image(self, page: int, data: str, rect: list) -> dict:
+        """İmza (ya da başka bir PNG) tam verilen dikdörtgene (pt); şeffaflık korunur"""
+        png = _b64(data)
+        if not png:
+            return {"ok": False, "error": "Resim okunamadı."}
+        fd, tmp = tempfile.mkstemp(suffix=".png", prefix="pdfim_img_")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(png)
+            result = self._mutate(page, self._ed.insert_image_file, page, tuple(rect), tmp)
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        return {**result, "rect": list(rect)}
+
+    def list_signatures(self) -> list:
+        """Kayıtlı imzalar, en yeni önce: [{id, data}] (data: PNG data URL)"""
+        try:
+            names = sorted((n for n in os.listdir(_SIGN_DIR) if n.endswith(".png")), reverse=True)
+        except OSError:
+            return []
+        out = []
+        for n in names[:MAX_SIGNATURES]:
+            try:
+                with open(os.path.join(_SIGN_DIR, n), "rb") as f:
+                    out.append({"id": n[:-4], "data": "data:image/png;base64," + base64.b64encode(f.read()).decode()})
+            except OSError:
+                continue
+        return out
+
+    def save_signature(self, data: str) -> dict:
+        png = _b64(data)
+        if not png or not png.startswith(b"\x89PNG"):
+            return {"ok": False, "error": "İmza kaydedilemedi."}
+        try:
+            os.makedirs(_SIGN_DIR, exist_ok=True)
+            sid = time.strftime("%Y%m%d-%H%M%S")
+            with open(os.path.join(_SIGN_DIR, sid + ".png"), "wb") as f:
+                f.write(png)
+            # En eski imzalar silinir: liste uzamasın
+            for n in sorted(n for n in os.listdir(_SIGN_DIR) if n.endswith(".png"))[:-MAX_SIGNATURES]:
+                os.remove(os.path.join(_SIGN_DIR, n))
+        except OSError as e:
+            return {"ok": False, "error": f"İmza kaydedilemedi.\n({e})"}
+        return {"ok": True, "id": sid}
+
+    def delete_signature(self, sid: str) -> dict:
+        name = os.path.basename(str(sid)) + ".png"           # yol dışına çıkılmasın
+        try:
+            os.remove(os.path.join(_SIGN_DIR, name))
+        except OSError:
+            pass
+        return {"ok": True}
+
     def open_dropped(self, path: str) -> dict | None:
         """Pencereye bırakılan PDF (Düzenle modu): kaydedilmemiş değişiklik varsa sorar"""
         if not self._confirm_discard():
@@ -341,6 +410,7 @@ class Api:
                 xs += [bx0, bx1]
                 ys += [by0, by1]
             return {"version": self._state.version(page), "spans": spans,
+                    "fields": ed.get_fields(page),
                     "images": images, "snapX": xs, "snapY": ys,
                     "content": [cx0, cy0, cx1, cy1]}
 
@@ -568,6 +638,16 @@ class Api:
             "Kaydedilmemiş değişiklikler",
             f"{os.path.basename(ed.path) or 'Belge'} dosyasındaki değişiklikler kaydedilmedi.\n"
             "Kaydetmeden devam edilsin mi?")
+
+
+def _b64(data: str | None) -> bytes | None:
+    """JS'ten gelen resim: data URL ("data:image/png;base64,…") ya da düz base64"""
+    if not data:
+        return None
+    try:
+        return base64.b64decode(data.split(",", 1)[-1])
+    except (binascii.Error, ValueError):
+        return None
 
 
 def _stack_order(page: fitz.Page, spans: list, images: list):

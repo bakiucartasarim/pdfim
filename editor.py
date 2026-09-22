@@ -21,6 +21,15 @@ _ARIAL_VARIANTS = {
 }
 
 
+def _winansi(text: str) -> bool:
+    """Standart PDF fontlarıyla (Helvetica, WinAnsi) çizilebilir mi — Türkçe ş ğ ı İ değil"""
+    try:
+        text.encode("cp1252")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
 _DO_RE = re.compile(rb"/([^\s/\[\]<>(){}%]+)\s+Do\b")
 
 
@@ -560,6 +569,103 @@ class PDFEditor:
         finally:
             out.close()
         return True
+
+    # ── Form alanları ─────────────────────────────────────────────────────────
+
+    _FIELD_TYPES = {
+        fitz.PDF_WIDGET_TYPE_TEXT: "text", fitz.PDF_WIDGET_TYPE_CHECKBOX: "checkbox",
+        fitz.PDF_WIDGET_TYPE_RADIOBUTTON: "radio", fitz.PDF_WIDGET_TYPE_COMBOBOX: "combo",
+        fitz.PDF_WIDGET_TYPE_LISTBOX: "list", fitz.PDF_WIDGET_TYPE_SIGNATURE: "signature",
+        fitz.PDF_WIDGET_TYPE_BUTTON: "button",
+    }
+
+    def get_fields(self, page_num: int) -> list:
+        """Sayfadaki form alanları (döndürülmemiş koordinat). Düğmeler (buton) doldurulamaz, atlanır."""
+        out = []
+        for w in self.doc[page_num].widgets() or []:
+            kind = self._FIELD_TYPES.get(w.field_type)
+            if not kind or kind == "button":
+                continue
+            r = w.rect
+            item = {"xref": w.xref, "name": w.field_name or "", "type": kind,
+                    "rect": (r.x0, r.y0, r.x1, r.y1), "value": w.field_value,
+                    "readonly": bool(w.field_flags & fitz.PDF_FIELD_IS_READ_ONLY),
+                    "label": w.field_label or ""}
+            if kind == "text":
+                item["multiline"] = bool(w.field_flags & fitz.PDF_TX_FIELD_IS_MULTILINE)
+                item["maxlen"] = w.text_maxlen or 0
+                item["fontsize"] = w.text_fontsize or 0
+            elif kind in ("combo", "list"):
+                item["options"] = [c if isinstance(c, str) else c[1] for c in (w.choice_values or [])]
+            elif kind in ("checkbox", "radio"):
+                item["on"] = w.on_state()
+                item["checked"] = w.field_value not in (None, "", "Off", False)
+            out.append(item)
+        return out
+
+    def set_field(self, page_num: int, xref: int, value) -> bool:
+        page = self.doc[page_num]
+        w = next((w for w in page.widgets() or [] if w.xref == xref), None)
+        if w is None:
+            raise ValueError("Form alanı bulunamadı.")
+        if w.field_flags & fitz.PDF_FIELD_IS_READ_ONLY:
+            raise ValueError("Bu alan salt okunur.")
+        kind = self._FIELD_TYPES.get(w.field_type)
+        if kind in ("checkbox", "radio"):
+            w.field_value = w.on_state() if value else "Off"
+        else:
+            w.field_value = "" if value is None else str(value)
+        w.update()
+        if kind in ("text", "combo") and not (w.field_flags & fitz.PDF_TX_FIELD_IS_MULTILINE) \
+                and not _winansi(str(w.field_value or "")):
+            self._unicode_appearance(page, w)
+        self.modified = True
+        return True
+
+    def _unicode_appearance(self, page: fitz.Page, w: fitz.Widget):
+        """MuPDF tek satırlı alan görünümünü WinAnsi dışı harflerde (ş, ğ, ı, İ…) kırpıyor ya da
+        hiç çizmiyor. Görünümü kendimiz üretiriz: geçici sayfaya metni Unicode fontla dikeyde
+        ortalayarak yaz, o sayfanın içeriğini ve kaynaklarını alanın görünüm nesnesi yap.
+        Değer (field_value) alanda doğru durur; başka programlar kendi görünümünü üretebilir."""
+        r = w.rect
+        width, height = r.width, r.height
+        text = str(w.field_value or "")
+        fontfile = fonts.fallback_file(False, False)
+        font = fitz.Font(fontfile=fontfile) if fontfile else fitz.Font("helv")
+        size = w.text_fontsize or 0
+        if not size:                                   # otomatik: yüksekliğe ve genişliğe sığdır
+            size = height * 0.62
+            tw = font.text_length(text, fontsize=size)
+            if tw > width - 4:
+                size *= (width - 4) / tw
+        size = max(4.0, min(size, height * 0.9))
+        base = (height + size * (font.ascender + font.descender)) / 2   # görsel ortalama
+        tmp = fitz.open()
+        try:
+            tp = tmp.new_page(width=width, height=height)
+            kw = {"fontfile": fontfile, "fontname": "PDFimUni"} if fontfile else {"fontname": "helv"}
+            color = w.text_color or (0, 0, 0)
+            tp.insert_text((2, base), text, fontsize=size, color=color, **kw)
+            self.doc.insert_pdf(tmp)
+        finally:
+            tmp.close()
+        src = self.doc[len(self.doc) - 1]
+        content = src.read_contents()
+        rtype, res = self.doc.xref_get_key(src.xref, "Resources")
+        res = res if rtype in ("dict", "xref") else "<<>>"
+        form = self.doc.get_new_xref()
+        self.doc.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {width:g} {height:g}]/Resources {res}>>")
+        self.doc.update_stream(form, content)
+        self.doc.delete_page(len(self.doc) - 1)       # fontlar görünüm nesnesinden referanslı, kalır
+        self.doc.xref_set_key(w.xref, "AP", f"<</N {form} 0 R>>")
+
+    def flatten_forms(self) -> list:
+        """Form alanlarını sayfanın kalıcı parçası yap (değerler artık değiştirilemez)"""
+        if not any(p.first_widget for p in self.doc):
+            raise ValueError("Belgede form alanı yok.")
+        self.doc.bake(annots=False, widgets=True)
+        self.modified = True
+        return []
 
     # ── Kaydet / Kapat ────────────────────────────────────────────────────────
 

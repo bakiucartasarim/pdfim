@@ -117,10 +117,19 @@ function renderLayer(i) {
     add(boxEl(`marquee${app.tool === 'alan-sil' ? ' is-erase' : ''}`, normRect(dr.start, dr.cur)));
   }
   if (app.placing && app.placing.pos && app.placing.pos.page === i) renderPlacement(add, app.placing);
+  renderFields(i, layer);
 }
 
 function renderPlacement(add, pl) {
   const { x, y, snap } = pl.pos, info = pl.info, kk = k();
+  if (pl.kind === 'image') {                       // imza: imlecin ortasında
+    const g = add(document.createElement('img'));
+    g.classList.add('place-image');
+    g.src = info.src;
+    Object.assign(g.style, { left: `${(x - info.w / 2) * kk}px`, top: `${(y - info.h / 2) * kk}px`,
+                             width: `${info.w * kk}px`, height: `${info.h * kk}px` });
+    return;
+  }
   if (snap) {
     const g = add(document.createElement('div'));
     g.classList.add('guide', 'guide-v');
@@ -306,12 +315,16 @@ function onDown(e, i, layer) {
   if (fromEditor(e) || e.button !== 0 || rotatedPage(i)) return;
   const [x, y] = ptAt(e, layer);
 
-  if (app.placing) {                           // yapıştırma: tıklanan yere
-    const pos = app.placing.pos && app.placing.pos.page === i ? app.placing.pos : { x, y };
+  if (app.placing) {                           // yapıştır / tarih / imza: tıklanan yere
+    const pl = app.placing;
+    const pos = pl.pos && pl.pos.page === i ? pl.pos : { x, y };
     endPlacement();
-    mutate(() => api().paste_text(i, pos.x, pos.y), 'Yapıştırıldı · Düzenlemek için çift tıklayın');
+    mutate(() => pl.place(i, pos.x, pos.y), pl.okMsg).then((r) => {
+      if (r && r.rect && pl.kind === 'image' && app.mode === 'duzenle') selectImageNear(i, r.rect);
+    });
     return;
   }
+  if (app.mode === 'form') return;              // form alanları kendi kutularıyla çalışır
   const d = layerData(i);
   const tool = app.tool;
 
@@ -358,14 +371,15 @@ function onMove(e, i, layer) {
 
   if (app.placing) {
     const d = layerData(i);
-    const hit = d ? nearest([x], d.snapX) : null;   // metin bloklarının sol/sağ kenarına yapış
+    // Metin: blokların sol/sağ kenarına yapış. İmza serbest.
+    const hit = d && app.placing.kind === 'text' ? nearest([x], d.snapX) : null;
     app.placing.pos = { page: i, x: hit ? hit[1] : x, y, snap: !!hit };
     renderLayer(i);
     return;
   }
 
   const dr = app.drag;
-  if (!dr) { updateHover(i, layer, x, y); return; }
+  if (!dr) { if (app.mode !== 'form') updateHover(i, layer, x, y); return; }
   if (dr.page !== i) return;
   const moved = Math.hypot(x - dr.start[0], y - dr.start[1]) * k() >= DRAG_START_PX;
   if (!dr.cur && !moved) return;
@@ -414,7 +428,7 @@ function onUp(e, i, layer) {
 }
 
 function onDblClick(e, i, layer) {
-  if (fromEditor(e) || (app.tool !== 'secim' && app.tool !== 'metin')) return;
+  if (fromEditor(e) || app.mode === 'form' || (app.tool !== 'secim' && app.tool !== 'metin')) return;
   const d = layerData(i);
   if (d && d.rotated) return;             // uyarıyı ilk tıklama zaten gösterdi
   if (!d) return;
@@ -469,6 +483,7 @@ async function onContextMenu(e, i, layer) {
   e.preventDefault();
   if (fromEditor(e) || rotatedPage(i)) return;
   if (app.placing) { endPlacement(); return; }   // sağ tık yapıştırmayı iptal eder
+  if (app.mode === 'form') return;
   const [x, y] = ptAt(e, layer);
   const d = layerData(i);
   const items = [];
@@ -549,9 +564,23 @@ function deleteImage(i, img) {
 }
 
 /** Yapıştırma önizlemesi: metin imleci takip eder, tıklanan yere yazılır */
-function startPlacement(info) {
+/** Metin önizlemesi imleci takip eder, tıklanan yere yazılır. place(i, x, yTaban) verilmezse
+ *  panodaki metin yapıştırılır. */
+function startPlacement(info, place, okMsg) {
   const lines = info.text.replace(/\r\n/g, '\n').replace(/\t/g, '    ').replace(/\n+$/, '').split('\n');
-  app.placing = { info: { ...info, lines }, pos: null };
+  app.placing = {
+    kind: 'text', info: { ...info, lines }, pos: null,
+    place: place || ((i, x, y) => api().paste_text(i, x, y)),
+    okMsg: okMsg || 'Yapıştırıldı · Düzenlemek için çift tıklayın',
+  };
+  setSelection(null);
+  $('pages').classList.add('is-placing');
+  updateStatus();
+}
+
+/** Resim (imza) imleci takip eder; tıklanan nokta resmin ortası. src: data URL, w/h: pt */
+function startImagePlacement(src, w, h, place, okMsg) {
+  app.placing = { kind: 'image', info: { src, w, h }, pos: null, place, okMsg };
   setSelection(null);
   $('pages').classList.add('is-placing');
   updateStatus();

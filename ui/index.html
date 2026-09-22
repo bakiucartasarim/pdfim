@@ -51,6 +51,16 @@
   <button type="button" id="btn-inspector" class="icon-btn" title="Özellikler panelini aç / kapat"><span class="ms">tune</span></button>
 </div>
 
+<!-- Form & İmza modu şeridi (form.js) -->
+<div id="form-strip" role="toolbar" aria-label="Form ve imza">
+  <button type="button" class="tool-btn tool-accent" data-fact="signature" title="Çizerek, yazarak ya da resimden imza ekle"><span class="ms">signature</span><span class="label">İmza Ekle</span></button>
+  <button type="button" class="tool-btn" data-fact="date" title="Bugünün tarihini tıklanan yere yaz"><span class="ms">calendar_today</span><span class="label">Tarih</span></button>
+  <span class="strip-sep"></span>
+  <button type="button" class="tool-btn" data-fact="flatten" title="Form alanlarını sayfanın kalıcı parçası yap"><span class="ms">layers_clear</span><span class="label">Formu Düzleştir</span></button>
+  <span class="strip-spacer"></span>
+  <span class="strip-note"><span class="ms">info</span>Görsel imza; güvenli elektronik imza değildir</span>
+</div>
+
 <!-- Sayfalar modu şeridi (pages.js) -->
 <div id="page-strip" role="toolbar" aria-label="Sayfa işlemleri">
   <button type="button" class="tool-btn" data-pact="select-all" title="Tümünü seç / bırak (Ctrl+A)"><span class="ms">select_check_box</span><span class="label">Tümünü Seç</span></button>
@@ -140,6 +150,61 @@
 
 <div id="toast" role="status" aria-live="polite"></div>
 <div id="page-drag-badge" hidden></div>
+
+<!-- İmza penceresi (signature.js) -->
+<div id="sig-modal" class="modal-backdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sig-title">
+    <div class="modal-head">
+      <span class="ms modal-icon">signature</span>
+      <h2 id="sig-title">İmza Ekle</h2>
+      <button type="button" id="sig-close" class="icon-btn" title="Kapat (Esc)"><span class="ms">close</span></button>
+    </div>
+    <div id="sig-tabs" class="seg seg-wide" role="tablist">
+      <button type="button" data-tab="saved" id="sig-tab-saved"><span class="ms">bookmark</span>Kayıtlı</button>
+      <button type="button" data-tab="draw"><span class="ms">draw</span>Çiz</button>
+      <button type="button" data-tab="type"><span class="ms">title</span>Yaz</button>
+      <button type="button" data-tab="upload"><span class="ms">upload</span>Yükle</button>
+    </div>
+
+    <div class="sig-pane" data-pane="saved"><div id="sig-saved"></div><p class="muted">Kullanmak için imzaya tıklayın.</p></div>
+
+    <div class="sig-pane" data-pane="draw">
+      <div class="sig-pad">
+        <canvas id="sig-canvas"></canvas>
+        <span id="sig-draw-hint">Fare ya da kalemle buraya imzanızı atın</span>
+        <div class="sig-pad-bar">
+          <div id="sig-colors">
+            <button type="button" data-color="#1e3a8a" class="is-active" style="--c:#1e3a8a" title="Lacivert"></button>
+            <button type="button" data-color="#111827" style="--c:#111827" title="Siyah"></button>
+            <button type="button" data-color="#2563eb" style="--c:#2563eb" title="Mavi"></button>
+          </div>
+          <span class="strip-spacer"></span>
+          <button type="button" id="sig-undo" class="btn btn-ghost"><span class="ms">undo</span>Son çizgi</button>
+          <button type="button" id="sig-clear" class="btn btn-ghost"><span class="ms">refresh</span>Temizle</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sig-pane" data-pane="type">
+      <input id="sig-text" class="fmt-input sig-text" placeholder="Adınız Soyadınız" autocomplete="name" spellcheck="false">
+      <div id="sig-fonts"></div>
+    </div>
+
+    <div class="sig-pane" data-pane="upload">
+      <label class="sig-drop"><input id="sig-file" type="file" accept="image/png,image/jpeg,image/bmp,image/gif"><span class="ms">add_photo_alternate</span><span>Taranmış ya da fotoğraflanmış imza seçin</span></label>
+      <label class="sig-check"><input id="sig-clear-bg" type="checkbox" checked> Beyaz arka planı kaldır</label>
+      <div id="sig-upload-preview"></div>
+    </div>
+
+    <div class="modal-foot">
+      <label class="sig-check" id="sig-save-row"><input id="sig-save" type="checkbox" checked> Bu imzayı sonra kullanmak üzere kaydet</label>
+      <span class="strip-spacer"></span>
+      <button type="button" id="sig-cancel" class="btn">Vazgeç</button>
+      <button type="button" id="sig-place" class="btn btn-primary"><span class="ms">check</span>Belgeye Yerleştir</button>
+    </div>
+    <p class="modal-legal">Bu görsel bir imzadır; 5070 sayılı Elektronik İmza Kanunu kapsamında güvenli elektronik imza yerine geçmez.</p>
+  </div>
+</div>
 <div id="ctx-menu" role="menu"></div>
 
 <!-- Metin düzenlenirken düzenleme kutusunun üstünde yüzer (editbox.js) -->
@@ -170,6 +235,8 @@
 <script src="js/layer.js"></script>
 <script src="js/inspector.js"></script>
 <script src="js/pages.js"></script>
+<script src="js/form.js"></script>
+<script src="js/signature.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
