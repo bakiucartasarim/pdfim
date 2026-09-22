@@ -1,5 +1,5 @@
 #define MyAppName      "PDFim"
-#define MyAppVersion   "1.5"
+#define MyAppVersion   "1.6"
 #define MyAppPublisher "PDFim"
 #define MyAppExeName   "PDFim.exe"
 #define MyAppURL       ""

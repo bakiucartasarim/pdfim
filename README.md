@@ -50,7 +50,10 @@ Bir metin düzenlenirken üstteki ikinci satır etkinleşir:
 
 ![Yapıştırılacak metnin önizlemesi](docs/yapistirma.png)
 
-**📥 Yapıştır** düğmesi ya da **Ctrl+V**:
+En hızlısı: sayfada boş bir yere **sağ tıklayın → Buraya yapıştır**. Metnin sol üst köşesi
+(ya da resmin sol üst köşesi) tıkladığınız noktaya gelir. Resimler ekrandaki doğal boyutunda eklenir.
+
+Ya da **📥 Yapıştır** düğmesi veya **Ctrl+V**:
 - **Metin:** metnin gri önizlemesi imleci takip eder. Sayfada nereye tıklarsanız oraya yazılır.
   Önizleme mevcut metinlerin kenarlarına yapışır (pembe çizgi), böylece yeni metin hizalı olur.
   **Esc** veya **sağ tık** vazgeçer.

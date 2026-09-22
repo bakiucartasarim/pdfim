@@ -219,6 +219,7 @@ class MainWindow(QMainWindow):
         self.viewer.image_align_req.connect(self._on_image_align)
         self.viewer.copy_requested.connect(self._on_copy_requested)
         self.viewer.place_done.connect(self._on_paste_placed)
+        self.viewer.paste_at.connect(self._paste_at)
         self.viewer.place_cancelled.connect(
             lambda: self._status_lbl.setText("Yapıştırma iptal edildi."))
         self.viewer.ctrl_scroll.connect(lambda d: self._zoom_in() if d > 0 else self._zoom_out())
@@ -974,19 +975,10 @@ class MainWindow(QMainWindow):
         if md is not None and md.hasImage():
             self._paste_image(QApplication.clipboard().image())
             return
-        txt = QApplication.clipboard().text()
-        if not txt.strip():
-            self._status_lbl.setText("Panoda yapıştırılacak metin veya resim yok.")
+        prepared = self._clipboard_text_for_paste()
+        if not prepared:
             return
-        # PDFim'den kopyalandıysa kaynağın biçimi; dışarıdan geldiyse Arial 10
-        style = self._last_copied_style if txt == self._last_copied else None
-        if style:
-            c = style.get("color", 0)
-            lum = (0.299 * (c >> 16 & 255) + 0.587 * (c >> 8 & 255) + 0.114 * (c & 255)) / 255
-            if lum > 0.85:
-                # Koyu zemin üstündeki beyaz başlık (ör. mavi bant) beyaz sayfaya
-                # yapıştırılınca görünmez oluyordu; font/punto/kalınlık korunur, renk siyah
-                style = {**style, "color": 0x000000}
+        txt, style = prepared
         sp = {**self.editor.DEFAULT_TEXT_STYLE, **(style or {})}
         self._paste_pending = (txt, style)
         lines = txt.replace("\r\n", "\n").replace("\t", "    ").rstrip("\n").split("\n")
@@ -996,6 +988,43 @@ class MainWindow(QMainWindow):
         self._status_lbl.setText(
             f"Yapıştırılacak yere tıklayın ({n} satır{', kaynak biçimiyle' if style else ''})  ·  "
             "Metin kenarlarına yapışır  ·  Esc / sağ tık → vazgeç")
+
+    def _clipboard_text_for_paste(self) -> "tuple[str, dict | None] | None":
+        """Panodaki metin + yapıştırma biçimi. PDFim'den kopyalandıysa kaynağın biçimi,
+        dışarıdan geldiyse None (→ Arial 10)."""
+        txt = QApplication.clipboard().text()
+        if not txt.strip():
+            self._status_lbl.setText("Panoda yapıştırılacak metin veya resim yok.")
+            return None
+        style = self._last_copied_style if txt == self._last_copied else None
+        if style:
+            c = style.get("color", 0)
+            lum = (0.299 * (c >> 16 & 255) + 0.587 * (c >> 8 & 255) + 0.114 * (c & 255)) / 255
+            if lum > 0.85:
+                # Koyu zemin üstündeki beyaz başlık (ör. mavi bant) beyaz sayfaya
+                # yapıştırılınca görünmez oluyordu; font/punto/kalınlık korunur, renk siyah
+                style = {**style, "color": 0x000000}
+        return txt, style
+
+    def _paste_at(self, wx: float, wy: float, page_num: int):
+        """Sağ tık → "Buraya yapıştır": önizleme adımı olmadan tıklanan noktaya"""
+        if not self.editor.doc:
+            return
+        self.viewer.cancel_placement()
+        z = self.viewer.zoom
+        md = QApplication.clipboard().mimeData()
+        if md is not None and md.hasImage():
+            self._paste_image(QApplication.clipboard().image(), page_num, (wx / z, wy / z))
+            return
+        prepared = self._clipboard_text_for_paste()
+        if not prepared:
+            return
+        txt, style = prepared
+        size = (style or self.editor.DEFAULT_TEXT_STYLE).get("size", 10.0)
+        # Sağ tıklanan nokta metnin üst-sol köşesi olsun (Word'deki imleç gibi);
+        # PDF'e taban çizgisi verilir → bir satırın yükseliği kadar aşağı
+        self._paste_pending = (txt, style)
+        self._on_paste_placed(wx, wy + size * 0.8 * z, page_num)
 
     def _on_paste_placed(self, wx: float, wy: float, page_num: int):
         if not self._paste_pending:
@@ -1013,7 +1042,7 @@ class MainWindow(QMainWindow):
             self._sync_undo_redo()
             self._status_lbl.setText("Metin yapıştırılamadı.")
 
-    def _paste_image(self, img):
+    def _paste_image(self, img, page_num: int | None = None, at: tuple | None = None):
         if img.isNull():
             self._status_lbl.setText("Panodaki resim okunamadı.")
             return
@@ -1025,7 +1054,7 @@ class MainWindow(QMainWindow):
                 return
             if self._current_mode != "image":
                 self._set_mode("image")          # eklenen resim seçili gelsin, hemen sürüklenebilsin
-            self._insert_image_path(tmp, "panodan resim")
+            self._insert_image_path(tmp, "panodan resim", page_num, at)
         finally:
             try:
                 os.remove(tmp)
@@ -1127,10 +1156,14 @@ class MainWindow(QMainWindow):
             return
         self._insert_image_path(path, os.path.basename(path))
 
-    def _insert_image_path(self, path: str, name: str):
+    def _insert_image_path(self, path: str, name: str,
+                           page_num: int | None = None, at: tuple | None = None):
+        """at verilirse (sağ tık → yapıştır) resmin üst-sol köşesi oraya ve resim
+        ekrandaki doğal boyutunda; verilmezse ekrandaki sayfanın ortasına."""
         # Eskiden en son dokunulan sayfaya (çoğu zaman 1. sayfa) ekliyordu;
         # artık ekranda bakılan sayfaya.
-        page_num = self.viewer.center_page()
+        if page_num is None:
+            page_num = self.viewer.center_page()
         page = self.editor.doc[page_num]
         pw, ph = page.rect.width, page.rect.height
 
@@ -1139,11 +1172,18 @@ class MainWindow(QMainWindow):
         size = QImageReader(path).size()
         iw, ih = (size.width(), size.height()) if size.isValid() else (1, 1)
         cx0, _, cx1, _ = self.editor.content_rect(page_num)
-        w = min(cx1 - cx0, pw * 0.4)
+        if at is not None:
+            w = min(iw * 0.75, cx1 - cx0)        # ekran alıntısı: 96 dpi → 1 px = 0.75 pt
+        else:
+            w = min(cx1 - cx0, pw * 0.4)
         h = w * ih / iw
         if h > ph * 0.4:
             h = ph * 0.4; w = h * iw / ih
-        x0, y0 = (pw - w) / 2, (ph - h) / 2
+        if at is not None:                       # sayfa dışına taşmasın
+            x0 = min(max(at[0], 0), pw - w)
+            y0 = min(max(at[1], 0), ph - h)
+        else:
+            x0, y0 = (pw - w) / 2, (ph - h) / 2
         rect = (x0, y0, x0 + w, y0 + h)
 
         self._push_snapshot()
@@ -1232,7 +1272,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "PDFim Hakkında",
             "<h2 style='color:#cdd6f4; margin:0'>PDFim</h2>"
-            "<p style='color:#a6adc8'>Sürüm 1.5  —  PDF Editörü</p>"
+            "<p style='color:#a6adc8'>Sürüm 1.6  —  PDF Editörü</p>"
             "<p style='color:#6c7086; font-size:12px'>"
             "PyMuPDF + PyQt6 ile geliştirildi.<br>"
             "Metin düzenleme · Biçim çubuğu · Kopyala-yapıştır · Resim hizalama · Orijinal font desteği"

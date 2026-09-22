@@ -114,6 +114,7 @@ class PageLabel(QLabel):
     copy_requested      = pyqtSignal(str, object) # ("span"|"line"|"page"|"selection", span | None)
     place_done          = pyqtSignal(float, float)  # yapıştırma: tıklanan taban çizgisi başlangıcı
     place_cancelled     = pyqtSignal()
+    paste_at            = pyqtSignal(float, float)  # sağ tık → "Buraya yapıştır" (widget koord.)
 
     SNAP_PX = 6   # bu kadar piksel yakına gelince kılavuz çizgiye yapışır
 
@@ -390,14 +391,16 @@ class PageLabel(QLabel):
             a = menu.addAction("⧉  Kopyala\tCtrl+C")
             a.setEnabled(bool(self._sel_highlight))
             a.triggered.connect(lambda: self.copy_requested.emit("selection", None))
+            self._add_paste_action(menu, event.pos())
+            menu.addSeparator()
             menu.addAction("Sayfadaki tüm metni seç\tCtrl+A").triggered.connect(
                 lambda: self.copy_requested.emit("page", None))
             menu.exec(event.globalPos()); return
-        if self._mode != "image":
-            return
-        hit = self._image_at(event.pos().x(), event.pos().y())
-        if not hit:
-            return
+        hit = self._image_at(event.pos().x(), event.pos().y()) if self._mode == "image" else None
+        if not hit:                              # boş alan / Alan Sil modu: sadece yapıştır
+            menu = QMenu(self)
+            self._add_paste_action(menu, event.pos())
+            menu.exec(event.globalPos()); return
         self._selected = hit; self.update()
         menu = QMenu(self)
         items = [("⇤  Sola hizala", "left"), ("↔  Yatay ortala", "hcenter"), ("⇥  Sağa hizala", "right"),
@@ -424,10 +427,22 @@ class PageLabel(QLabel):
                 lambda: self.copy_requested.emit("span", span))
             menu.addAction("Satırın tamamını kopyala").triggered.connect(
                 lambda: self.copy_requested.emit("line", span))
-            menu.addSeparator()
+        self._add_paste_action(menu, event.pos())
+        menu.addSeparator()
         menu.addAction("Sayfadaki tüm metni kopyala").triggered.connect(
             lambda: self.copy_requested.emit("page", None))
         menu.exec(event.globalPos())
+
+    def _add_paste_action(self, menu: QMenu, pos: QPoint):
+        """Sağ tıklanan noktaya yapıştır. Pano boşsa pasif görünür (varlığı bilinsin)."""
+        md = QApplication.clipboard().mimeData()
+        has_img = md is not None and md.hasImage()
+        has_txt = md is not None and md.hasText() and bool(md.text().strip())
+        label = "📥  Resmi buraya yapıştır\tCtrl+V" if has_img else "📥  Buraya yapıştır\tCtrl+V"
+        a = menu.addAction(label)
+        a.setEnabled(has_img or has_txt)
+        x, y, _ = self._place_point(pos)         # metin kenarlarına yapışsın
+        a.triggered.connect(lambda: self.paste_at.emit(x, y))
 
     def keyPressEvent(self, event):
         if self._place is not None and event.key() == Qt.Key.Key_Escape:
@@ -762,6 +777,7 @@ class PDFViewerWidget(QWidget):
     copy_requested   = pyqtSignal(str, object, int)
     place_done       = pyqtSignal(float, float, int)
     place_cancelled  = pyqtSignal()
+    paste_at         = pyqtSignal(float, float, int)
     ctrl_scroll      = pyqtSignal(int)
 
     def __init__(self):
@@ -807,7 +823,10 @@ class PDFViewerWidget(QWidget):
                 lbl.set_images(images_fn(i), self.zoom)
 
             wrapper = QWidget()
-            wrapper.setStyleSheet("background: white;")
+            # Seçicisiz "background: white" tüm alt widget'lara (sağ tık menüleri dahil)
+            # miras kalıyordu: koyu menü beyaz zeminde soluk yazıyla okunmuyordu.
+            wrapper.setObjectName("PageWrapper")
+            wrapper.setStyleSheet("#PageWrapper { background: white; }")
             wl = QVBoxLayout(wrapper)
             wl.setContentsMargins(0, 0, 0, 0)
             wl.addWidget(lbl)
@@ -823,6 +842,7 @@ class PDFViewerWidget(QWidget):
             lbl.copy_requested.connect(lambda k, s, pg=p: self.copy_requested.emit(k, s, pg))
             lbl.place_done.connect(lambda x, y, pg=p: self._on_placed(x, y, pg))
             lbl.place_cancelled.connect(self.cancel_placement)
+            lbl.paste_at.connect(lambda x, y, pg=p: self.paste_at.emit(x, y, pg))
 
             self._layout.addWidget(wrapper, alignment=Qt.AlignmentFlag.AlignHCenter)
             self._page_labels.append(lbl)
