@@ -223,6 +223,13 @@ class Api:
             if not ed.doc or not 0 <= page < ed.page_count():
                 return None
             p = ed.doc[page]
+            if p.rotation:
+                # editor.py döndürülmemiş koordinatla, ekran döndürülmüş hâlde çalışıyor; kutular
+                # yanlış yere düşer ve düzenleme yanlış noktaya yapılırdı. Tam destek gelene
+                # kadar bu sayfalarda düzenleme kapalı (arayüz açıklayan mesaj gösterir).
+                return {"version": self._state.version(page), "spans": [], "images": [],
+                        "snapX": [], "snapY": [], "content": [0, 0, p.rect.width, p.rect.height],
+                        "rotated": True}
             spans = []
             for block in p.get_text("dict", flags=TEXT_ONLY)["blocks"]:
                 if block["type"] != 0:

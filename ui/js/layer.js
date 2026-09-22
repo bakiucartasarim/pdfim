@@ -293,8 +293,17 @@ function capture(layer, e) {
 
 const fromEditor = (e) => e.target.closest('.edit-box, #fmt-bar');
 
+/** Döndürülmüş sayfada düzenleme henüz yok (bridge.page_layer): yanlış yere yazmak yerine söyle */
+function rotatedPage(i) {
+  const d = layerData(i);
+  if (!d || !d.rotated) return false;
+  if (app.placing) endPlacement();
+  toast('Bu sayfa döndürülmüş (ör. yatay taranmış belge); böyle sayfalarda düzenleme henüz desteklenmiyor.');
+  return true;
+}
+
 function onDown(e, i, layer) {
-  if (fromEditor(e) || e.button !== 0) return;
+  if (fromEditor(e) || e.button !== 0 || rotatedPage(i)) return;
   const [x, y] = ptAt(e, layer);
 
   if (app.placing) {                           // yapıştırma: tıklanan yere
@@ -407,6 +416,7 @@ function onUp(e, i, layer) {
 function onDblClick(e, i, layer) {
   if (fromEditor(e) || (app.tool !== 'secim' && app.tool !== 'metin')) return;
   const d = layerData(i);
+  if (d && d.rotated) return;             // uyarıyı ilk tıklama zaten gösterdi
   if (!d) return;
   const [x, y] = ptAt(e, layer);
   const span = spanAt(d, x, y);
@@ -457,7 +467,7 @@ async function selectTextIn(i, rect) {
 
 async function onContextMenu(e, i, layer) {
   e.preventDefault();
-  if (fromEditor(e)) return;
+  if (fromEditor(e) || rotatedPage(i)) return;
   if (app.placing) { endPlacement(); return; }   // sağ tık yapıştırmayı iptal eder
   const [x, y] = ptAt(e, layer);
   const d = layerData(i);
