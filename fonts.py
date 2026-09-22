@@ -138,11 +138,16 @@ def match_family(pdf_font_name: str) -> str | None:
         return None
     if key in by_norm:
         return by_norm[key]
-    # "TimesNewRomanPSMT" → "timesnewroman", "Helvetica" → Arial muadili
-    aliases = {"helvetica": "Arial", "helv": "Arial", "times": "Times New Roman",
-               "timesroman": "Times New Roman", "courier": "Courier New"}
-    if key in aliases and aliases[key] in system_fonts():
-        return aliases[key]
+    # "TimesNewRomanPSMT" → "timesnewroman", "Helvetica" → Arial muadili. Linux'ta (web
+    # sunucusu) Microsoft fontları yok; aynı genişlikteki Liberation aileleri karşılığı.
+    sans, serif, mono = ("Arial", "Liberation Sans"), ("Times New Roman", "Liberation Serif"), \
+        ("Courier New", "Liberation Mono")
+    aliases = {"helvetica": sans, "helv": sans, "arial": sans, "times": serif, "timesroman": serif,
+               "timesnew": serif, "timesnewroman": serif, "courier": mono, "couriernew": mono,
+               "calibri": ("Calibri", "Carlito"), "cambria": ("Cambria", "Caladea")}
+    for family in aliases.get(key, ()):
+        if family in system_fonts():
+            return family
     # En uzun ortak önek — "arialnarrow" > "arial"
     best = max(by_norm, key=lambda n: (key.startswith(n) or n.startswith(key)) * len(n), default=None)
     if best and (key.startswith(best) or best.startswith(key)) and len(best) >= 4:
