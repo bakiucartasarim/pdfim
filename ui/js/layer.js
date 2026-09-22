@@ -3,7 +3,8 @@
  * Seçim aracı: metne tıkla → seç, sürükle → taşı, çift tıkla → düzenle; resme tıkla → seç,
  *   sürükle → taşı, tutamaçlar → boyutlandır (köşeler oranı korur, Shift → oransız),
  *   sayfa/metin kenarlarına ve diğer resimlere yapışır (Alt → serbest).
- * Metin aracı: boş yere tıkla → yeni yazı, metne tıkla → düzenle.
+ * Metin aracı: boş yere tıkla → yeni yazı; metne tıkla → seç, çift tıkla → düzenle.
+ * (Tek tık hiçbir araçta düzenlemeye girmez — seçmek isteyen kullanıcıyı şaşırtıyordu.)
  * Metin Seç / Alan Sil: alan sürükle.
  */
 'use strict';
@@ -108,7 +109,7 @@ function renderLayer(i) {
   if (dr && dr.guides) {
     for (const [kind, v] of dr.guides) {
       const g = add(document.createElement('div'));
-      g.className = `guide guide-${kind} lx`;
+      g.classList.add('guide', `guide-${kind}`);
       g.style[kind === 'v' ? 'left' : 'top'] = `${v * kk}px`;
     }
   }
@@ -122,11 +123,11 @@ function renderPlacement(add, pl) {
   const { x, y, snap } = pl.pos, info = pl.info, kk = k();
   if (snap) {
     const g = add(document.createElement('div'));
-    g.className = 'guide guide-v lx';
+    g.classList.add('guide', 'guide-v');
     g.style.left = `${x * kk}px`;
   }
   const ghost = add(document.createElement('div'));
-  ghost.className = 'place-ghost';
+  ghost.classList.add('place-ghost');
   const px = info.size * kk;
   Object.assign(ghost.style, {
     left: `${x * kk}px`, top: `${(y - info.size * 0.8) * kk}px`,
@@ -137,7 +138,7 @@ function renderPlacement(add, pl) {
   ghost.textContent = info.lines.slice(0, 60).join('\n');
   // Taban çizgisi işareti: metin tam bu çizginin üstüne oturur
   const base = add(document.createElement('div'));
-  base.className = 'place-base';
+  base.classList.add('place-base');
   base.style.left = `${x * kk - 6}px`;
   base.style.top = `${y * kk}px`;
 }
@@ -314,20 +315,19 @@ function onDown(e, i, layer) {
   }
   if (!d) return;
 
-  if (tool === 'metin') {
-    const span = spanAt(d, x, y);
-    // Tarayıcı fare basışının ardından odağı değiştirir; kutu ondan sonra açılsın
-    setTimeout(() => openEditor(i, span, span ? null : [x, y]), 0);
+  if (tool === 'metin' && !spanAt(d, x, y)) {
+    // Boş yer → yeni yazı. Tarayıcı fare basışının ardından odağı değiştirir; kutu ondan sonra açılsın
+    setTimeout(() => openEditor(i, null, [x, y]), 0);
     return;
   }
 
-  // Seçim aracı
+  // Seçim aracı (Metin Ekle'de mevcut metne tıklamak da seçer; düzenlemek çift tıkla)
   const sel = app.sel && app.sel.page === i ? app.sel : null;
   const handle = sel && sel.type === 'image' ? handleAt(sel.item.rect, x, y) : null;
   if (handle) {
     app.drag = { kind: 'resize', page: i, handle, start: [x, y], orig: sel.item.rect, item: sel.item, cur: null };
   } else {
-    const { span, img } = pickAt(d, x, y);
+    const { span, img } = tool === 'metin' ? { span: spanAt(d, x, y) } : pickAt(d, x, y);
     if (span) {
       setSelection({ type: 'span', page: i, item: span });
       app.drag = { kind: 'text', page: i, start: [x, y], item: span, cur: null };
@@ -405,7 +405,7 @@ function onUp(e, i, layer) {
 }
 
 function onDblClick(e, i, layer) {
-  if (fromEditor(e) || app.tool !== 'secim') return;
+  if (fromEditor(e) || (app.tool !== 'secim' && app.tool !== 'metin')) return;
   const d = layerData(i);
   if (!d) return;
   const [x, y] = ptAt(e, layer);
