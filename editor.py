@@ -7,6 +7,9 @@ import fitz  # PyMuPDF
 
 import fonts
 
+# get_text("dict") varsayılanı resimlerin baytlarını da çıkarır; bize yalnız metin lazım
+TEXT_ONLY = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES
+
 _FONTS_DIR = "C:/Windows/Fonts"
 
 # Bold/italic kombinasyonuna göre fallback Arial dosyaları
@@ -16,6 +19,17 @@ _ARIAL_VARIANTS = {
     (False, True):  "ariali.ttf",
     (True,  True):  "arialbi.ttf",
 }
+
+
+_DO_RE = re.compile(rb"/([^\s/\[\]<>(){}%]+)\s+Do\b")
+
+
+def _do_counts(content: bytes) -> dict:
+    """İçerik akışında "/Ad Do" ile çizilen XObject adları → kaç kez çizildiği"""
+    counts: dict = {}
+    for name in _DO_RE.findall(content):
+        counts[name] = counts.get(name, 0) + 1
+    return counts
 
 
 class PDFEditor:
@@ -222,7 +236,7 @@ class PDFEditor:
         kaynağındaki biçimle yapıştırılabilsin diye"""
         r = fitz.Rect(rect)
         cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
-        for block in self.doc[page_num].get_text("dict")["blocks"]:
+        for block in self.doc[page_num].get_text("dict", flags=TEXT_ONLY)["blocks"]:
             for line in block.get("lines", []):
                 for s in line["spans"]:
                     b = fitz.Rect(s["bbox"])
@@ -341,22 +355,45 @@ class PDFEditor:
         if not self.doc:
             return []
         page = self.doc[page_num]
-        result, seen = [], set()
-        for img in page.get_images(full=True):
-            xref = img[0]
-            if xref in seen:
+        # Yalnız sayfada gerçekten çizilen resimlerin konumu hesaplanır. Dialux raporları
+        # belgedeki ~100 resmin hepsini her sayfanın kaynaklarına koyuyor; her biri için
+        # get_image_rects() (ve get_image_info(xrefs=True)) resimlerin özetini çıkardığından
+        # bir sayfa 5 sn sürüyordu. Hangi resmin çizildiği içerik akışındaki "/Ad Do"dan belli.
+        try:
+            items = page.get_images(full=True)
+        except Exception:
+            return []
+        if not items:
+            return []
+        drawn = {0: _do_counts(page.read_contents())}     # 0: sayfanın kendi içeriği
+        result = []
+        for item in items:
+            xref, w, h, name, referencer = item[0], item[2], item[3], item[7], item[9]
+            if referencer not in drawn:                     # form nesnesinin içindeki resim
+                drawn[referencer] = _do_counts(self.doc.xref_stream(referencer) or b"")
+            times = drawn[referencer].get(name.encode("latin-1", "replace"), 0)
+            if not times:
                 continue
-            seen.add(xref)
             try:
-                for r in page.get_image_rects(xref):
-                    rect = (r.x0, r.y0, r.x1, r.y1)
-                    # Aynı içerikli resimler farklı xref'lerde de aynı konumları döndürebiliyor
-                    if any(d["rect"] == rect for d in result):
-                        continue
-                    result.append({"xref": xref, "rect": rect,
-                                   "w": img[2], "h": img[3]})
+                # Tek çizim → hızlı sınır kutusu; aynı resim birkaç yerdeyse hepsi
+                if times > 1:
+                    rects = page.get_image_rects(item)
+                else:
+                    r = page.get_image_bbox(item)
+                    # get_image_bbox döndürülmüş sayfa koordinatı verir; get_text ve bu sınıfın
+                    # diğer işlemleri (get_image_rects gibi) döndürülmemiş koordinatla çalışır
+                    if page.rotation and not (r.is_empty or r.is_infinite):
+                        r = r * page.derotation_matrix
+                    rects = [r]
             except Exception:
                 continue
+            for r in rects:
+                if r.is_empty or r.is_infinite:
+                    continue
+                rect = (r.x0, r.y0, r.x1, r.y1)
+                if any(d["rect"] == rect for d in result):      # aynı yere iki kez çizilmiş
+                    continue
+                result.append({"xref": xref, "rect": rect, "w": w, "h": h})
         return result
 
     def _remove_image(self, page: fitz.Page, rect: tuple):

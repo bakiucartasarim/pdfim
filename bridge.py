@@ -18,7 +18,7 @@ import webview
 
 import clipboard
 import fonts
-from editor import PDFEditor
+from editor import PDFEditor, TEXT_ONLY
 
 MAX_UNDO = 20
 MAX_RECENT = 10
@@ -224,7 +224,7 @@ class Api:
                 return None
             p = ed.doc[page]
             spans = []
-            for block in p.get_text("dict")["blocks"]:
+            for block in p.get_text("dict", flags=TEXT_ONLY)["blocks"]:
                 if block["type"] != 0:
                     continue
                 for line in block["lines"]:
