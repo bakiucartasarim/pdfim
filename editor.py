@@ -233,15 +233,18 @@ class PDFEditor:
     def insert_new_text(self, page_num: int, origin: tuple, text: str,
                         style: dict | None = None) -> bool:
         """Sayfaya yeni metin yaz. origin: ilk satırın taban çizgisi başlangıcı (PDF pt).
-        Çok satırlı metin alt alta yazılır; Tab'lar (tablodan kopya) boşluğa çevrilir."""
+        Çok satırlı metin alt alta yazılır; Tab'lar (tablodan kopya) boşluğa çevrilir.
+        style: font/flags/size/color (kopyalanan kaynağın biçimi); isteğe bağlı family/bold/italic
+        biçim çubuğundan gelir ve flags'i ezer."""
         if not self.doc or not text.strip():
             return False
         page = self.doc[page_num]
         sp = {**self.DEFAULT_TEXT_STYLE, **(style or {})}
         flags = sp.get("flags", 0)
         text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ").rstrip("\n")
-        st = {"family": None, "size": sp["size"], "bold": bool(flags & 16),
-              "italic": bool(flags & 2), "color": sp["color"]}
+        st = {"family": sp.get("family"), "size": sp["size"],
+              "bold": sp.get("bold", bool(flags & 16)),
+              "italic": sp.get("italic", bool(flags & 2)), "color": sp["color"]}
         try:
             font_kw = self._resolve_font(page, sp, st, text)
             page.insert_text(origin, text, fontsize=sp["size"], lineheight=1.25,

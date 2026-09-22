@@ -1,4 +1,4 @@
-/* PDFim v2 — arayüz mantığı.
+/* PDFim v2 — belge görünümü, komutlar ve klavye. En son yüklenir ve uygulamayı başlatır.
  *
  * Sayfalar Python tarafında PyMuPDF ile PNG olarak çizilir ve yerel sunucudan <img> ile yüklenir
  * (page_server.py). Ekrandaki yerleşim PDF noktası (pt) cinsinden sayfa boyutlarından hesaplanır;
@@ -6,58 +6,95 @@
  */
 'use strict';
 
-const PT_TO_PX = 96 / 72;          // %100 yakınlaştırmada 1 pt kaç CSS pikseli
 const ZOOM_MIN = 0.25, ZOOM_MAX = 4;
-const STAGE_PAD = 48;              // #pages kenar boşluğu (sığdırma hesabı için)
+const STAGE_PAD = 48;              // #pages yan boşluğu — app.css ile aynı olmalı
 const THUMB_W = 200;               // küçük resim genişliği (CSS px)
-const MODE_NAMES = { duzenle: 'Düzenleme', aciklama: 'Açıklama & Not', sayfalar: 'Sayfalar', form: 'Form & İmza' };
-const TOOL_NAMES = { secim: 'Seçim', metin: 'Metin', resim: 'Resim', 'metin-sec': 'Metin Seç', 'alan-sil': 'Alan Sil' };
-
-const $ = (id) => document.getElementById(id);
-const api = () => window.pywebview && window.pywebview.api;
-
-const app = window.app = {
-  doc: null,          // Python get_state() çıktısı; belge yoksa null
-  zoom: 1,
-  fit: 'width',       // 'width' | 'page' | null — pencere boyu değişince yeniden sığdırılır
-  current: 0,         // ekrandaki sayfa (0 tabanlı)
-  mode: 'duzenle',
-  tool: 'secim',
-  pageEls: [],
-  thumbEls: [],
+const TOOL_HINTS = {
+  secim: 'Tıkla: seç · Sürükle: taşı · Çift tık: düzenle',
+  metin: 'Yazı eklemek için tıklayın · Metne tıklayınca düzenlenir',
+  'metin-sec': 'Alan sürükleyin — seçilen metin kopyalanır',
+  'alan-sil': 'Silinecek alanı sürükleyin',
 };
+const MODE_NAMES = { duzenle: 'Düzenleme', aciklama: 'Açıklama & Not', sayfalar: 'Sayfalar', form: 'Form & İmza' };
 
 /* ── Belge durumu ─────────────────────────────────────────────────────────── */
 
 function applyState(state) {
-  const wasOpen = !!app.doc;
-  const prevRev = app.doc && app.doc.rev;
+  const prev = app.doc;
   app.doc = state && state.open ? state : null;
+  const doc = app.doc;
 
-  $('doc-title').textContent = app.doc ? app.doc.name : 'Belge açılmadı';
-  $('doc-title').title = app.doc ? app.doc.path : '';
-  $('empty-state').classList.toggle('is-hidden', !!app.doc);
-  $('btn-save').disabled = !app.doc;
-  $('btn-undo').disabled = !(app.doc && app.doc.canUndo);
-  $('btn-redo').disabled = !(app.doc && app.doc.canRedo);
-  document.body.classList.toggle('has-doc', !!app.doc);
+  $('doc-title').textContent = doc ? doc.name : 'Belge açılmadı';
+  $('doc-title').title = doc ? doc.path : '';
+  $('empty-state').classList.toggle('is-hidden', !!doc);
+  $('btn-save').disabled = !doc;
+  $('btn-undo').disabled = !(doc && doc.canUndo);
+  $('btn-redo').disabled = !(doc && doc.canRedo);
+  document.body.classList.toggle('has-doc', !!doc);
 
-  if (!app.doc) {
+  if (!doc) {
+    app.layers.clear();
     buildPages();
+    renderInspector();
+    renderRecent(state ? state.recent : []);
     return;
   }
-  if (app.doc.rev !== prevRev) {
+  const rebuild = !prev || prev.gen !== doc.gen || prev.pages.length !== doc.pages.length;
+  if (rebuild) {
     // Yeni belge → en baştan, genişliğe sığdırarak.
-    // Aynı belgenin yeni revizyonu (geri al vb.) → kaydırma konumu ve sayfa korunur.
-    const stage = $('stage'), top = wasOpen ? stage.scrollTop : 0;
-    app.current = wasOpen ? Math.min(app.current, app.doc.pages.length - 1) : 0;
-    if (!wasOpen) app.fit = 'width';
+    // Aynı belge yeniden yüklendi (geri al / yinele) → kaydırma konumu ve sayfa korunur.
+    const sameFile = prev && prev.path === doc.path && !app.freshOpen;
+    const stage = $('stage'), top = sameFile ? stage.scrollTop : 0;
+    app.current = sameFile ? Math.min(app.current, doc.pages.length - 1) : 0;
+    if (!sameFile) app.fit = 'width';
+    app.freshOpen = false;
+    app.layers.clear();
+    app.sel = null;
+    app.highlight = null;
+    app.hover = null;
     buildPages();
     if (app.fit) fitZoom(app.fit, false);
     stage.scrollTop = top;
     setCurrent(app.current);
+    renderInspector();
+  } else {
+    // Yalnız değişen sayfaların görüntüsü ve kutuları yenilenir
+    doc.versions.forEach((v, i) => { if (v !== prev.versions[i]) refreshPage(i); });
   }
   updatePageCounter();
+}
+
+function refreshPage(i) {
+  if (app.sel && app.sel.page === i) app.sel = null;
+  if (app.highlight && app.highlight.page === i) app.highlight = null;
+  if (app.hover && app.hover.page === i) app.hover = null;
+  if (visiblePages.has(app.pageEls[i])) { loadPageImage(app.pageEls[i]); fetchLayer(i); }
+  else renderLayer(i);
+  const t = app.thumbEls[i];
+  if (t && t.firstChild.dataset.key) loadThumb(t, i);
+  renderInspector();
+}
+
+function renderRecent(paths) {
+  const list = $('recent-list');
+  list.replaceChildren();
+  if (!paths || !paths.length) return;
+  const h = document.createElement('div');
+  h.className = 'caps';
+  h.textContent = 'Son açılanlar';
+  list.append(h);
+  for (const p of paths) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'recent-item';
+    b.title = p;
+    const cut = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'));
+    b.innerHTML = '<span class="ms">picture_as_pdf</span><span class="recent-text"><span class="recent-name"></span><span class="recent-dir"></span></span>';
+    b.querySelector('.recent-name').textContent = p.slice(cut + 1);
+    b.querySelector('.recent-dir').textContent = p.slice(0, cut);
+    b.addEventListener('click', async () => handleOpenResult(await serial(() => api().open_path(p))));
+    list.append(b);
+  }
 }
 
 app.onExternalOpen = (result) => handleOpenResult(result);
@@ -71,7 +108,7 @@ async function handleOpenResult(result) {
   }
   if (!result) return;
   if (!result.ok) return showError(result.error);
-  app.doc = null;   // aynı dosya yeniden açılsa bile "yeni belge" gibi davran
+  app.freshOpen = true;   // aynı dosya yeniden açılsa bile "yeni belge" gibi davran
   applyState(result.state);
 }
 
@@ -79,6 +116,8 @@ async function handleOpenResult(result) {
 
 function buildPages() {
   const pages = $('pages'), thumbs = $('thumb-list');
+  commitOpenEdit();
+  hideFormatBar();
   pages.replaceChildren();
   thumbs.replaceChildren();
   app.pageEls = [];
@@ -97,7 +136,10 @@ function buildPages() {
     const img = document.createElement('img');
     img.alt = `Sayfa ${i + 1}`;
     img.draggable = false;
-    page.append(img);
+    const layer = document.createElement('div');
+    layer.className = 'layer';
+    bindLayer(layer, i);
+    page.append(img, layer);
     pages.append(page);
     app.pageEls.push(page);
     pageObserver.observe(page);
@@ -125,8 +167,8 @@ function layoutPages() {
   if (!app.doc) return;
   app.doc.pages.forEach(([w, h], i) => {
     const el = app.pageEls[i];
-    el.style.width = `${Math.round(w * PT_TO_PX * app.zoom)}px`;
-    el.style.height = `${Math.round(h * PT_TO_PX * app.zoom)}px`;
+    el.style.width = `${Math.round(w * k())}px`;
+    el.style.height = `${Math.round(h * k())}px`;
   });
   $('zoom-slider').value = Math.round(app.zoom * 100);
   $('zoom-label').textContent = `${Math.round(app.zoom * 100)}%`;
@@ -134,39 +176,47 @@ function layoutPages() {
 
 /* Çizim ölçeği: ekran pikseli başına bir görüntü pikseli (yüksek DPI ekranlarda keskin) */
 function renderScale() {
-  return +(app.zoom * PT_TO_PX * (window.devicePixelRatio || 1)).toFixed(3);
+  return +(k() * (window.devicePixelRatio || 1)).toFixed(3);
 }
 
 function pageUrl(i, scale) {
-  return `../page/${i}.png?s=${scale}&v=${app.doc.rev}`;
+  return `../page/${i}.png?s=${scale}&v=${app.doc.versions[i]}`;
 }
 
 function loadPageImage(page) {
   const i = +page.dataset.index, s = renderScale();
-  const img = page.firstChild;
-  if (img.dataset.key === `${app.doc.rev}:${s}`) return;
-  img.dataset.key = `${app.doc.rev}:${s}`;
+  const img = page.firstChild, key = `${app.doc.versions[i]}:${s}`;
+  if (img.dataset.key === key) return;
+  img.dataset.key = key;
   img.src = pageUrl(i, s);
 }
 
-// Sayfa görüntüleri yalnız ekrana yaklaşınca istenir (yüzlerce sayfalık datasheet'ler için şart)
+function loadThumb(thumb, i) {
+  const img = thumb.firstChild;
+  const s = +(THUMB_W / app.doc.pages[i][0] * (window.devicePixelRatio || 1)).toFixed(3);
+  const key = `${app.doc.versions[i]}:${s}`;
+  if (img.dataset.key === key) return;
+  img.dataset.key = key;
+  img.src = pageUrl(i, s);
+}
+
+// Sayfa görüntüleri ve kutuları yalnız ekrana yaklaşınca istenir (yüzlerce sayfalık datasheet'ler için şart)
 const visiblePages = new Set();
 const pageObserver = new IntersectionObserver((entries) => {
   for (const e of entries) {
-    if (e.isIntersecting) { visiblePages.add(e.target); loadPageImage(e.target); }
-    else visiblePages.delete(e.target);
+    if (e.isIntersecting) {
+      visiblePages.add(e.target);
+      loadPageImage(e.target);
+      fetchLayer(+e.target.dataset.index);
+    } else {
+      visiblePages.delete(e.target);
+    }
   }
 }, { root: $('stage'), rootMargin: '600px 0px' });
 
 const thumbObserver = new IntersectionObserver((entries) => {
   for (const e of entries) {
-    if (!e.isIntersecting) continue;
-    const thumb = e.target, i = app.thumbEls.indexOf(thumb), img = thumb.firstChild;
-    const s = +(THUMB_W / app.doc.pages[i][0] * (window.devicePixelRatio || 1)).toFixed(3);
-    if (img.dataset.key !== `${app.doc.rev}:${s}`) {
-      img.dataset.key = `${app.doc.rev}:${s}`;
-      img.src = pageUrl(i, s);
-    }
+    if (e.isIntersecting) loadThumb(e.target, app.thumbEls.indexOf(e.target));
   }
 }, { root: $('thumb-list'), rootMargin: '400px 0px' });
 
@@ -184,6 +234,8 @@ function setZoom(z, keepFit = false) {
   const anchorX = (stage.scrollLeft + stage.clientWidth / 2) / Math.max(1, stage.scrollWidth);
   app.zoom = z;
   layoutPages();
+  renderAllLayers();          // kutular pt'den yeniden hesaplanır
+  layoutEditor();
   stage.scrollTop = anchor * stage.scrollHeight - stage.clientHeight / 2;
   stage.scrollLeft = anchorX * stage.scrollWidth - stage.clientWidth / 2;
   // Kaydırıcı sürüklenirken her adımda çizdirme; görüntü CSS ile büyür, durunca keskinleşir
@@ -209,8 +261,7 @@ function fitZoom(kind, userAction = true) {
 function scrollToPage(i, behavior = 'smooth') {
   if (!app.doc) return;
   i = Math.min(app.doc.pages.length - 1, Math.max(0, i));
-  const stage = $('stage'), el = app.pageEls[i];
-  stage.scrollTo({ top: el.offsetTop - STAGE_PAD / 2, behavior });
+  $('stage').scrollTo({ top: app.pageEls[i].offsetTop - STAGE_PAD / 2, behavior });
   setCurrent(i);
 }
 
@@ -223,6 +274,7 @@ function setCurrent(i) {
     t.scrollIntoView({ block: 'nearest' });
   }
   updatePageCounter();
+  if (!app.sel) renderInspector();
 }
 
 function updatePageCounter() {
@@ -257,48 +309,74 @@ function paperName(wPt, hPt) {
 }
 
 function updateStatus() {
-  const parts = [`${MODE_NAMES[app.mode]} · ${TOOL_NAMES[app.tool]}`];
+  let hint = TOOL_HINTS[app.tool];
+  if (app.placing) hint = 'Yapıştırılacak yere tıklayın · Metin kenarlarına yapışır · Esc: vazgeç';
+  else if (isEditing()) hint = 'Enter: uygula · Esc: vazgeç';
+  const parts = [hint];
   if (app.doc) parts.push(paperName(...app.doc.pages[app.current]));
   $('status-text').textContent = parts.join('  ·  ');
-}
-
-/* ── Bildirimler ──────────────────────────────────────────────────────────── */
-
-let toastTimer = 0;
-function toast(msg) {
-  const t = $('toast');
-  t.textContent = msg;
-  t.classList.add('is-visible');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('is-visible'), 2600);
-}
-
-function showError(msg) {
-  window.alert(msg || 'Beklenmeyen bir hata oluştu.');
 }
 
 /* ── Komutlar ─────────────────────────────────────────────────────────────── */
 
 const commands = {
-  async open() { handleOpenResult(await api().open_dialog()); },
+  async open() { commitOpenEdit(); handleOpenResult(await serial(() => api().open_dialog())); },
   async save() {
     if (!app.doc) return;
-    const r = await api().save();
+    commitOpenEdit();                 // açık düzenleme önce uygulansın (sıra kuyruğu garanti eder)
+    const r = await serial(() => api().save());
     if (!r) return;
-    if (!r.ok) return showError(r.error);
-    applyState(r.state);
-    toast('Kaydedildi');
+    if (r.ok) { applyState(r.state); toast('Kaydedildi'); return; }
+    // Dosya başka programda açıksa (Adobe, Outlook önizleme…) başka yere kaydetmeyi öner
+    if (window.confirm(`Dosya kaydedilemedi.\n\n${r.error}\n\nFarklı bir yere kaydetmek ister misiniz?`)) commands.saveAs();
   },
   async saveAs() {
     if (!app.doc) return;
-    const r = await api().save_as();
-    if (!r) return;
-    if (!r.ok) return showError(r.error);
-    applyState(r.state);
-    toast('Kaydedildi');
+    commitOpenEdit();
+    if (await mutate(() => api().save_as())) toast('Kaydedildi');
   },
-  async undo() { if (app.doc && app.doc.canUndo) applyState(await api().undo()); },
-  async redo() { if (app.doc && app.doc.canRedo) applyState(await api().redo()); },
+  async undo() {
+    commitOpenEdit();
+    if (app.doc && app.doc.canUndo) applyState(await serial(() => api().undo()));
+  },
+  async redo() {
+    commitOpenEdit();
+    if (app.doc && app.doc.canRedo) applyState(await serial(() => api().redo()));
+  },
+  async addImage() {
+    if (!app.doc) return;
+    const i = app.current;
+    const r = await mutate(() => api().add_image(i), 'Resim eklendi · Sürükle: kılavuzlara yapışır · Alt: serbest');
+    if (r) { setTool('secim'); selectImageNear(i, r.rect); }
+  },
+  copy() {
+    if (!app.doc) return;
+    if (app.sel && app.sel.type === 'span') return copyText('span', app.sel.page, app.sel.item);
+    if (app.highlight && app.highlight.rects.length) return selectTextIn(app.highlight.page, app.highlight.rect);
+    toast('Önce bir metne tıklayın ya da Metin Seç (Ctrl+3) ile alan seçin.');
+  },
+  async paste() {
+    if (!app.doc) return;
+    const info = await api().clipboard_info();
+    if (info.kind === 'image') {
+      const i = app.current;
+      const r = await mutate(() => api().paste_image(i, null), 'Resim yapıştırıldı');
+      if (r) { setTool('secim'); selectImageNear(i, r.rect); }
+    } else if (info.kind === 'text') {
+      startPlacement(info);
+    } else {
+      toast('Panoda yapıştırılacak metin veya resim yok.');
+    }
+  },
+  selectAll() { if (app.doc) selectPageText(app.current); },
+  deleteSelected() {
+    if (app.sel && app.sel.type === 'image') deleteImage(app.sel.page, app.sel.item);
+  },
+  escape() {
+    if (menuOpen()) return hideMenu();
+    if (app.placing) return endPlacement();
+    clearTransient();
+  },
   zoomIn() { setZoom(app.zoom * 1.2); },
   zoomOut() { setZoom(app.zoom / 1.2); },
   fitWidth() { fitZoom('width'); },
@@ -314,9 +392,14 @@ function setMode(mode) {
 }
 
 function setTool(tool) {
+  if (tool === app.tool) return;
+  commitOpenEdit();
+  endPlacement();
   app.tool = tool;
   document.querySelectorAll('#tool-strip [data-tool]').forEach((b) =>
     b.classList.toggle('is-active', b.dataset.tool === tool));
+  $('pages').dataset.tool = tool;
+  clearTransient();
   updateStatus();
 }
 
@@ -350,9 +433,13 @@ function bind() {
     b.addEventListener('click', () => setMode(b.dataset.mode)));
   document.querySelectorAll('#tool-strip [data-tool]').forEach((b) =>
     b.addEventListener('click', () => setTool(b.dataset.tool)));
+  const actions = { 'add-image': commands.addImage, copy: commands.copy, paste: commands.paste };
+  document.querySelectorAll('#tool-strip [data-action]').forEach((b) =>
+    b.addEventListener('click', () => actions[b.dataset.action]()));
 
   let scrollRaf = 0;
   $('stage').addEventListener('scroll', () => {
+    hideMenu();
     if (scrollRaf || !app.doc) return;
     scrollRaf = requestAnimationFrame(() => {
       scrollRaf = 0;
@@ -370,32 +457,40 @@ function bind() {
 
   let resizeTimer = 0;
   window.addEventListener('resize', () => {
+    hideMenu();
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => { if (app.fit) fitZoom(app.fit, false); }, 120);
   });
 
   document.addEventListener('keydown', onKey);
+  bindFormatBar();
 }
 
-const TOOL_KEYS = { 1: 'metin', 2: 'resim', 3: 'metin-sec', 4: 'alan-sil' };   // v1 ile aynı
+const TOOL_KEYS = { 1: 'secim', 2: 'metin', 3: 'metin-sec', 4: 'alan-sil' };
 
 function onKey(e) {
-  if (!e.ctrlKey) return;
-  const inField = e.target.matches('input, textarea, [contenteditable="true"]');
-  const k = e.key.toLowerCase();
+  const inField = e.target.matches('input, textarea, select, [contenteditable="true"]');
+  const key = e.key.toLowerCase();
   let handled = true;
-  if (k === 'o') commands.open();
-  else if (k === 's' && e.shiftKey) commands.saveAs();
-  else if (k === 's') commands.save();
-  else if (inField) handled = false;   // metin kutusundayken Ctrl+Z vb. kutunun kendisine kalsın
-  else if (k === 'z' && e.shiftKey) commands.redo();
-  else if (k === 'z') commands.undo();
-  else if (k === 'y') commands.redo();
-  else if (k === '=' || k === '+') commands.zoomIn();
-  else if (k === '-') commands.zoomOut();
-  else if (k === 'w' && e.shiftKey) commands.fitPage();
-  else if (k === 'w') commands.fitWidth();
-  else if (TOOL_KEYS[k]) setTool(TOOL_KEYS[k]);
+  if (e.ctrlKey && key === 'o') commands.open();
+  else if (e.ctrlKey && key === 's' && e.shiftKey) commands.saveAs();
+  else if (e.ctrlKey && key === 's') commands.save();
+  else if (inField) handled = false;   // metin kutusundayken Ctrl+Z, Ctrl+C vb. kutunun kendisine kalsın
+  else if (e.key === 'Escape') commands.escape();
+  else if (e.key === 'Delete' || e.key === 'Backspace') commands.deleteSelected();
+  else if (!e.ctrlKey) handled = false;
+  else if (key === 'z' && e.shiftKey) commands.redo();
+  else if (key === 'z') commands.undo();
+  else if (key === 'y') commands.redo();
+  else if (key === 'c') commands.copy();
+  else if (key === 'v') commands.paste();
+  else if (key === 'a') commands.selectAll();
+  else if (key === 'i') commands.addImage();
+  else if (key === '=' || key === '+') commands.zoomIn();
+  else if (key === '-') commands.zoomOut();
+  else if (key === 'w' && e.shiftKey) commands.fitPage();
+  else if (key === 'w') commands.fitWidth();
+  else if (TOOL_KEYS[key]) setTool(TOOL_KEYS[key]);
   else handled = false;
   if (handled) e.preventDefault();
 }
@@ -405,12 +500,12 @@ function onKey(e) {
 // Python tarafındaki istisnalar köprü Promise'ini reddeder; sessizce kaybolmasın
 window.addEventListener('unhandledrejection', (e) => {
   const err = e.reason || {};
-  showError(`İşlem tamamlanamadı.
-(${err.message || err})`);
+  showError(`İşlem tamamlanamadı.\n(${err.message || err})`);
 });
 
 bind();
 setMode('duzenle');
+app.tool = null;
 setTool('secim');
 applyState(null);
 

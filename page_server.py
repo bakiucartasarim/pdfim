@@ -88,8 +88,8 @@ class PageServer:
 
     # ── İstek işleme ─────────────────────────────────────────────────────────
 
-    def _render(self, page_num: int, scale: float, rev: int) -> bytes | None:
-        key = (rev, page_num, round(scale, 3))
+    def _render(self, page_num: int, scale: float, version: str) -> bytes | None:
+        key = (version, page_num, round(scale, 3))
         data = self.cache.get(key)
         if data is not None:
             return data
@@ -97,7 +97,8 @@ class PageServer:
         # köprüdeki düzenleme işlemleri de aynı kilidi tutar.
         with self.state.lock:
             ed = self.state.editor
-            if rev != self.state.rev or not ed.doc or not 0 <= page_num < ed.page_count():
+            if not ed.doc or not 0 <= page_num < ed.page_count() \
+                    or version != self.state.version(page_num):
                 return None
             data = ed.render_page(page_num, scale)
         self.cache.put(key, data)
@@ -122,13 +123,12 @@ class PageServer:
                     q = parse_qs(url.query)
                     try:
                         scale = min(_MAX_SCALE, max(_MIN_SCALE, float(q.get("s", ["1.5"])[0])))
-                        rev = int(q.get("v", ["-1"])[0])
                     except ValueError:
                         return self.send_error(400)
-                    data = server._render(int(m.group(1)), scale, rev)
+                    data = server._render(int(m.group(1)), scale, q.get("v", [""])[0])
                     if data is None:
-                        return self.send_error(410)   # eski revizyon ya da belge kapandı
-                    # URL revizyon içerdiği için içerik hiç değişmez → uzun süre önbelleklenebilir
+                        return self.send_error(410)   # eski sürüm ya da belge kapandı
+                    # URL sayfa sürümünü içerdiği için içerik hiç değişmez → uzun süre önbelleklenebilir
                     return self._send(data, "image/png", "max-age=31536000, immutable")
 
                 if rel.startswith("ui/"):

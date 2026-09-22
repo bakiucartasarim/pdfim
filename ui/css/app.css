@@ -500,14 +500,203 @@ body:not(.has-doc) #status-pill { display: none; }
 }
 #toast.is-visible { opacity: 1; transform: none; }
 
+/* Boş ekrandaki son dosyalar */
+#recent-list { display: flex; flex-direction: column; gap: 2px; width: 380px; max-width: 90%; margin-top: var(--s-4); }
+#recent-list:empty { display: none; }
+#recent-list .caps { margin: 0 0 var(--s-1) var(--s-2); }
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  text-align: left;
+}
+.recent-item:hover { background: var(--panel); box-shadow: var(--shadow-1); }
+.recent-item .ms { color: var(--danger); font-size: 20px; }
+.recent-name { font-size: var(--fs-label); font-weight: 500; color: var(--ink); }
+.recent-dir { font-size: var(--fs-label-sm); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-text { display: flex; flex-direction: column; min-width: 0; }
+
+/* ── Sayfa katmanı (layer.js) ────────────────────────────────────────────── */
+
+.layer { position: absolute; inset: 0; }
+#pages[data-tool="metin-sec"] .layer,
+#pages[data-tool="alan-sil"] .layer,
+#pages.is-placing .layer { cursor: crosshair !important; }
+
+.layer .lx { position: absolute; pointer-events: none; }
+
+/* Seçim vurgusu: DESIGN.md "Active Area Highlight" */
+.hover-box { background: rgba(79, 70, 229, 0.06); outline: 1px solid rgba(79, 70, 229, 0.35); }
+.hover-box.is-image { background: transparent; outline: 1.5px dashed rgba(79, 70, 229, 0.6); }
+.sel-span { background: rgba(79, 70, 229, 0.08); outline: 1.5px dashed var(--primary); }
+.drag-ghost { background: rgba(79, 70, 229, 0.18); outline: 2px solid var(--primary); }
+.word-hl { background: rgba(59, 130, 246, 0.28); }
+
+.img-box.is-selected { outline: 1.5px solid var(--primary); background: rgba(79, 70, 229, 0.06); }
+.img-box .handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border: 1.5px solid var(--primary);
+  background: #fff;
+  pointer-events: none;   /* tutamaç isabeti layer.js'te koordinatla hesaplanır */
+}
+
+.guide { background: #ec4899; }
+.guide-v { top: 0; bottom: 0; width: 1px; }
+.guide-h { left: 0; right: 0; height: 1px; }
+
+.marquee { background: rgba(59, 130, 246, 0.14); outline: 1px solid var(--secondary); }
+.marquee.is-erase { background: rgba(239, 68, 68, 0.12); outline: 1px dashed var(--danger); }
+
+.place-ghost { white-space: pre; opacity: 0.55; }
+.place-base { width: 46px; border-top: 1px dashed #f59e0b; }
+
+/* ── Metin düzenleme kutusu (editbox.js) ─────────────────────────────────── */
+
+.edit-box {
+  position: absolute;
+  z-index: 20;
+  margin: 0;
+  padding: 1px 3px;
+  border: 0;
+  border-radius: var(--r-xs);
+  outline: 2px solid var(--primary);
+  background: #fffef5;
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.15);
+  line-height: 1;
+  user-select: text;
+}
+
+#fmt-bar {
+  position: absolute;
+  z-index: 30;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  background: var(--glass);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-2);
+  white-space: nowrap;
+  cursor: default;
+}
+#fmt-bar.is-open { display: flex; }
+#fmt-bar .icon-btn { width: 28px; height: 28px; }
+#fmt-bar .icon-btn .ms { font-size: 18px; }
+.fmt-sep { width: 1px; height: 18px; margin: 0 3px; background: var(--border); }
+.fmt-input {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--field);
+  font-size: var(--fs-body-sm);
+  user-select: text;
+}
+.fmt-input:focus { outline: none; border-color: var(--primary); background: var(--panel); }
+.fmt-font { width: 170px; }
+.fmt-size { width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
+.fmt-color {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.fmt-color:hover { background: var(--hover); }
+.fmt-color .ms { font-size: 18px; }
+.fmt-color input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+/* ── Sağ tık menüsü (menu.js) ────────────────────────────────────────────── */
+
+#ctx-menu {
+  position: fixed;
+  z-index: 200;
+  display: none;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-3);
+}
+#ctx-menu.is-open { display: block; }
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font-size: var(--fs-label);
+  text-align: left;
+  white-space: nowrap;
+}
+.menu-item .ms { width: 18px; font-size: 18px; color: var(--ink-3); }
+.menu-item:not(:disabled):hover { background: var(--primary-tint); color: var(--primary); }
+.menu-item:not(:disabled):hover .ms { color: var(--primary); }
+.menu-item.is-danger:not(:disabled):hover { background: #fef2f2; color: var(--danger-deep); }
+.menu-item.is-danger:not(:disabled):hover .ms { color: var(--danger-deep); }
+.menu-label { flex: 1; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+.menu-hint { font-size: var(--fs-label-sm); color: var(--ink-3); }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+
+/* ── Özellikler paneli (inspector.js) ────────────────────────────────────── */
+
+.insp-section { display: flex; flex-direction: column; gap: var(--s-2); margin-bottom: var(--s-5); }
+.insp-row { display: flex; justify-content: space-between; gap: var(--s-3); font-size: var(--fs-body-sm); color: var(--ink-2); }
+.insp-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.insp-quote {
+  padding: var(--s-2) var(--s-3);
+  border-left: 2px solid var(--primary);
+  border-radius: var(--r-sm);
+  background: var(--surface-low);
+  font-size: var(--fs-body-sm);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.swatch { width: 12px; height: 12px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.15); }
+.align-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; padding: 3px; border-radius: var(--r-md); background: var(--surface-low); }
+.align-grid .icon-btn { width: 100%; }
+.align-grid .icon-btn:hover { background: var(--panel); color: var(--primary); }
+.insp-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-4); }
+#inspector-body .muted { margin: 0 0 var(--s-3); }
+.btn-danger { color: var(--danger-deep); }
+.btn-danger:not(:disabled):hover { background: #fef2f2; border-color: #fecaca; }
+
 /* ── Dar pencere ─────────────────────────────────────────────────────────── */
 
-@media (max-width: 1280px) {
+@media (max-width: 1180px) {
   #tool-strip .label, #zoom-bar .label { display: none; }
   .tool-btn { padding: 0 8px; }
   #mode-tabs button { padding: 0 10px; }
 }
-@media (max-width: 1120px) {
+@media (max-width: 1060px) {
   :root { --rail-w: 200px; --inspector-w: 240px; }
   .doc-chip { max-width: 180px; }
   .topbar-actions .label { display: none; }

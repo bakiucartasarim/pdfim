@@ -38,12 +38,14 @@
 
 <!-- Araç şeridi -->
 <div id="tool-strip" role="toolbar" aria-label="Araçlar">
-  <button type="button" class="tool-btn" data-tool="secim" title="Seçim"><span class="ms">arrow_selector_tool</span><span class="label">Seçim</span></button>
-  <button type="button" class="tool-btn" data-tool="metin" title="Metin (Ctrl+1)"><span class="ms">title</span><span class="label">Metin</span></button>
-  <button type="button" class="tool-btn" data-tool="resim" title="Resim Ekle (Ctrl+2)"><span class="ms">image</span><span class="label">Resim Ekle</span></button>
-  <button type="button" class="tool-btn" data-tool="metin-sec" title="Metin Seç (Ctrl+3)"><span class="ms">select_all</span><span class="label">Metin Seç</span></button>
+  <button type="button" class="tool-btn" data-tool="secim" title="Seçim (Ctrl+1) — tıkla: seç, sürükle: taşı, çift tık: düzenle"><span class="ms">arrow_selector_tool</span><span class="label">Seçim</span></button>
+  <button type="button" class="tool-btn" data-tool="metin" title="Metin Ekle (Ctrl+2)"><span class="ms">title</span><span class="label">Metin Ekle</span></button>
+  <button type="button" class="tool-btn" data-tool="metin-sec" title="Metin Seç (Ctrl+3) — alan sürükle, kopyalanır"><span class="ms">select_all</span><span class="label">Metin Seç</span></button>
+  <button type="button" class="tool-btn tool-danger" data-tool="alan-sil" title="Alan Sil (Ctrl+4) — alanın üzeri beyazla kapatılır"><span class="ms">ink_eraser</span><span class="label">Alan Sil</span></button>
   <span class="strip-sep"></span>
-  <button type="button" class="tool-btn tool-danger" data-tool="alan-sil" title="Alan Sil (Ctrl+4)"><span class="ms">ink_eraser</span><span class="label">Alan Sil</span></button>
+  <button type="button" class="tool-btn" data-action="add-image" title="Resim Ekle (Ctrl+I)"><span class="ms">add_photo_alternate</span><span class="label">Resim Ekle</span></button>
+  <button type="button" class="tool-btn" data-action="copy" title="Kopyala (Ctrl+C)"><span class="ms">content_copy</span><span class="label">Kopyala</span></button>
+  <button type="button" class="tool-btn" data-action="paste" title="Yapıştır (Ctrl+V) — ya da sayfada sağ tık → Buraya yapıştır"><span class="ms">content_paste</span><span class="label">Yapıştır</span></button>
   <span class="strip-spacer"></span>
   <span id="page-counter"></span>
   <button type="button" id="btn-inspector" class="icon-btn" title="Özellikler panelini aç / kapat"><span class="ms">tune</span></button>
@@ -80,6 +82,7 @@
       <p class="empty-title">PDF açmak için tıklayın veya sürükleyip bırakın</p>
       <button type="button" id="btn-open-empty" class="btn btn-primary btn-lg"><span class="ms">folder_open</span><span>PDF Aç</span></button>
       <p class="empty-hint">Ctrl+O</p>
+      <div id="recent-list"></div>
     </div>
 
     <div id="zoom-bar">
@@ -113,7 +116,35 @@
 </main>
 
 <div id="toast" role="status" aria-live="polite"></div>
+<div id="ctx-menu" role="menu"></div>
 
+<!-- Metin düzenlenirken düzenleme kutusunun üstünde yüzer (editbox.js) -->
+<div id="fmt-bar" role="toolbar" aria-label="Biçim">
+  <input id="fmt-font" list="font-list" class="fmt-input fmt-font" title="Font — boş bırakılırsa orijinal font" autocomplete="off" spellcheck="false">
+  <datalist id="font-list"></datalist>
+  <span class="fmt-sep"></span>
+  <button type="button" id="fmt-size-down" class="icon-btn" title="Küçült"><span class="ms">remove</span></button>
+  <input id="fmt-size" class="fmt-input fmt-size" title="Punto" autocomplete="off">
+  <button type="button" id="fmt-size-up" class="icon-btn" title="Büyüt"><span class="ms">add</span></button>
+  <span class="fmt-sep"></span>
+  <button type="button" id="fmt-bold" class="icon-btn" title="Kalın (Ctrl+B)"><span class="ms">format_bold</span></button>
+  <button type="button" id="fmt-italic" class="icon-btn" title="İtalik (Ctrl+I)"><span class="ms">format_italic</span></button>
+  <button type="button" id="fmt-underline" class="icon-btn" title="Altı çizili (Ctrl+U)"><span class="ms">format_underlined</span></button>
+  <label class="fmt-color" title="Metin rengi"><input id="fmt-color" type="color"><span class="ms">format_color_text</span></label>
+  <span class="fmt-sep"></span>
+  <button type="button" id="fmt-align-left" class="icon-btn" title="Sola yasla (orijinal konum)"><span class="ms">format_align_left</span></button>
+  <button type="button" id="fmt-align-center" class="icon-btn" title="Orijinal kutuda ortala"><span class="ms">format_align_center</span></button>
+  <button type="button" id="fmt-align-right" class="icon-btn" title="Orijinal kutuda sağa yasla — tablo değerleri için"><span class="ms">format_align_right</span></button>
+  <span class="fmt-sep"></span>
+  <button type="button" id="fmt-symbols" class="icon-btn" title="Sembol ekle (², °, µ, ± …)"><span class="ms">special_character</span></button>
+  <button type="button" id="fmt-reset" class="icon-btn" title="Biçimi orijinaline döndür"><span class="ms">format_clear</span></button>
+</div>
+
+<script src="js/core.js"></script>
+<script src="js/menu.js"></script>
+<script src="js/editbox.js"></script>
+<script src="js/layer.js"></script>
+<script src="js/inspector.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
