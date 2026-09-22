@@ -143,41 +143,18 @@ Kullanılan kütüphaneler: [PyMuPDF](https://pymupdf.readthedocs.io/) ve [PyQt6
 
 ## v2 (geliştiriliyor — `v2-webview` dalı)
 
-v2'de arayüz HTML'e taşındı ve aynı koddan iki sürüm çıkıyor. PDF motoru (`editor.py`) v1 ile aynı.
-
-| | Masaüstü | Web |
-|---|---|---|
-| Çalıştırma | `venv_build\Scripts\python app.py [dosya.pdf]` | `docker build -t pdfim . && docker run -p 8000:8000 pdfim` |
-| Arayüz | pywebview (Windows'taki WebView2) | Tarayıcı |
-| Dosyalar | Aç / Kaydet | Yükle / İndir. Belge yalnız oturumda tutulur, hareketsiz kalınca silinir |
-| Pano | Windows panosu | Tarayıcı panosu (Ctrl+V izin istemez; sağ tık → yapıştır izin isteyebilir) |
-
-Web sürümünün ayarları ortam değişkenleriyle yapılır:
-
-| Değişken | Varsayılan | |
-|---|---|---|
-| `PDFIM_MAX_UPLOAD_MB` | 50 | En büyük yükleme |
-| `PDFIM_MAX_PAGES` | 500 | En fazla sayfa |
-| `PDFIM_MAX_SESSIONS` | 100 | Aynı anda açık oturum |
-| `PDFIM_IDLE_MINUTES` | 60 | Hareketsiz oturum bu süre sonra silinir |
-| `PDFIM_SOURCE_URL` | bu depo | Arayüzdeki "Kaynak kod" bağlantısı (AGPL gereği) |
-| `PDFIM_NOTICE` | boş | Doluysa üst çubukta "TEST" rozeti ve açılış ekranında bu uyarı (herkese açık deneme kurulumu için) |
-| `PDFIM_SELFHOST_URL` | README'deki bu bölüm | "Kendi sunucunda çalıştır" bağlantısı |
-
-Oturumlar bellekte tutulduğu için sunucu **tek süreç** çalışmalıdır (birden çok uvicorn işçisi kullanmayın).
+v2'de arayüz HTML'e taşındı; pencere pywebview ile Windows'taki WebView2'yi kullanır.
+PDF motoru (`editor.py`) v1 ile aynı. Çalıştırma: `venv_build\Scripts\python app.py [dosya.pdf]`
 
 | Dosya | İçerik |
 |---|---|
-| `app.py` | Masaüstü giriş noktası (pywebview penceresi) |
-| `server.py` | Web giriş noktası (FastAPI; oturumlar, yükle/indir, sınırlar) |
-| `bridge.py` | Arayüzün çağırdığı işlemler; iki sürümde ortak |
-| `page_server.py` | Masaüstünde sayfa görüntülerini sunan yerel sunucu |
-| `clipboard.py` | Windows panosu (yalnız masaüstü) |
-| `ui/` | Arayüz: `index.html`, `css/`, `js/` (`platform.js` masaüstü/web farkları) |
+| `app.py` | Giriş noktası (pywebview penceresi) |
+| `bridge.py` | Arayüzün çağırdığı işlemler (JS ↔ Python köprüsü) |
+| `page_server.py` | Sayfa görüntülerini arayüze veren yerel sunucu |
+| `clipboard.py` | Windows panosu |
+| `ui/` | Arayüz: `index.html`, `css/`, `js/` |
 
 ## Lisans
 
 PDFim, [GNU Affero General Public License v3.0](LICENSE) ile lisanslanmış açık kaynak bir yazılımdır.
-PDF işlemleri için kullanılan PyMuPDF de AGPL lisanslıdır. Bu yüzden PDFim'i değiştirip
-**ağ üzerinden bir hizmet olarak** sunarsanız, değiştirilmiş kaynak kodu da o hizmetin
-kullanıcılarına sunmanız gerekir. Web arayüzündeki "Kaynak kod" bağlantısı bunun içindir.
+PDF işlemleri için kullanılan PyMuPDF de AGPL lisanslıdır.

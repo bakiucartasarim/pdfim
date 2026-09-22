@@ -299,9 +299,8 @@ function onDown(e, i, layer) {
 
   if (app.placing) {                           // yapıştırma: tıklanan yere
     const pos = app.placing.pos && app.placing.pos.page === i ? app.placing.pos : { x, y };
-    const info = app.placing.info;
     endPlacement();
-    mutate(() => platform.pasteText(i, pos.x, pos.y, info), 'Yapıştırıldı · Düzenlemek için çift tıklayın');
+    mutate(() => api().paste_text(i, pos.x, pos.y), 'Yapıştırıldı · Düzenlemek için çift tıklayın');
     return;
   }
   const d = layerData(i);
@@ -450,7 +449,6 @@ async function selectTextIn(i, rect) {
   app.highlight = { page: i, rects: r.rects || [], rect };
   renderLayer(i);
   if (!r.ok) return toast(r.error);
-  platform.afterCopy(r.text);
   const preview = r.text.replace(/\n/g, ' ').replace(/\t/g, ' · ').slice(0, 50);
   toast(`Kopyalandı (${r.text.length} karakter): "${preview}"`);
 }
@@ -491,7 +489,7 @@ async function onContextMenu(e, i, layer) {
   // Sağ tıklanan nokta metnin (ya da resmin) sol üst köşesi olur; metin kenarlarına yapışır
   const snap = d ? nearest([x], d.snapX) : null;
   const px = snap ? snap[1] : x;
-  const info = await platform.peekClipboard();
+  const info = await api().clipboard_info();
   if (items.length) items.push('-');
   items.push({ icon: 'content_paste', label: info.kind === 'image' ? 'Resmi buraya yapıştır' : 'Buraya yapıştır',
                hint: 'Ctrl+V', disabled: !info.kind, run: () => pasteAt(i, px, y, info) });
@@ -519,7 +517,6 @@ function alignItems(i, img) {
 async function copyText(kind, i, span) {
   const r = await api().copy_text(kind, i, span);
   if (!r.ok) return toast(r.error);
-  platform.afterCopy(r.text);
   const what = kind === 'line' ? ' — satır' : kind === 'page' ? ` — sayfa ${i + 1}` : '';
   toast(`Kopyalandı${what} (${r.text.length} karakter)`);
 }
@@ -560,14 +557,13 @@ function endPlacement() {
 }
 
 async function pasteAt(i, x, y, info) {
-  if (info.kind === 'unknown') info = await platform.readClipboard();   // web: ancak şimdi okunur
   if (info.kind === 'image') {
-    const r = await mutate(() => platform.pasteImage(i, [x, y], info), 'Resim yapıştırıldı');
+    const r = await mutate(() => api().paste_image(i, [x, y]), 'Resim yapıştırıldı');
     if (r) { setTool('secim'); selectImageNear(i, r.rect); }
   } else if (info.kind === 'text') {
     // Tıklanan nokta metnin sol üstü; PDF'e taban çizgisi verilir → bir satır yüksekliği aşağı
-    mutate(() => platform.pasteText(i, x, y + info.size * 0.8, info), 'Yapıştırıldı · Düzenlemek için çift tıklayın');
+    mutate(() => api().paste_text(i, x, y + info.size * 0.8), 'Yapıştırıldı · Düzenlemek için çift tıklayın');
   } else {
-    usePasteInfo(info);                          // izin yok / pano boş → açıklayan mesaj
+    usePasteInfo(info);                          // pano boş / kilitli → açıklayan mesaj
   }
 }

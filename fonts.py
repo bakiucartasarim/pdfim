@@ -2,7 +2,6 @@
 
 import os
 import re
-import subprocess
 import sys
 
 try:
@@ -36,9 +35,9 @@ def system_fonts() -> dict:
     if _cache is not None:
         return _cache
     fams: dict = {}
-    if winreg is None:                       # Linux (web sunucusu): fontconfig
-        _cache = _scan_fontconfig()
-        return _cache
+    if winreg is None:
+        _cache = fams
+        return fams
     # HKCU: kullanıcının yönetici yetkisi olmadan kurduğu fontlar
     for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
         try:
@@ -71,31 +70,8 @@ def system_fonts() -> dict:
     return fams
 
 
-def _scan_fontconfig() -> dict:
-    """fc-list çıktısından aile → (kalın, italik) → dosya. Light/Medium gibi ara
-    ağırlıklar atlanır; biçim çubuğunda yalnız normal/kalın/italik seçiliyor."""
-    try:
-        out = subprocess.run(["fc-list", "--format", "%{family[0]}\\t%{style[0]}\\t%{file}\\n"],
-                             capture_output=True, text=True, timeout=20).stdout
-    except (OSError, subprocess.SubprocessError):
-        return {}
-    fams: dict = {}
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) != 3 or not parts[2].lower().endswith((".ttf", ".otf", ".ttc")):
-            continue
-        family, style, path = parts[0].strip(), parts[1].lower(), parts[2]
-        bold = "bold" in style
-        italic = "italic" in style or "oblique" in style
-        rest = re.sub(r"bold|italic|oblique", "", style).strip()
-        if family and rest in ("", "regular", "book", "roman", "normal"):
-            fams.setdefault(family, {}).setdefault((bold, italic), path)
-    return fams
-
-
-# Metin yazılırken son çare: belgedeki font da eşleşen sistem fontu da karakteri
-# içermiyorsa. Liberation Sans, Arial ile aynı genişliklerde (Linux'taki karşılığı).
-_FALLBACK_FAMILIES = ("Arial", "Liberation Sans", "DejaVu Sans", "Noto Sans")
+# Metin yazılırken son çare: belgedeki font da eşleşen sistem fontu da karakteri içermiyorsa
+_FALLBACK_FAMILIES = ("Arial", "Segoe UI", "Tahoma")
 
 
 def fallback_file(bold: bool, italic: bool) -> str | None:
@@ -138,16 +114,11 @@ def match_family(pdf_font_name: str) -> str | None:
         return None
     if key in by_norm:
         return by_norm[key]
-    # "TimesNewRomanPSMT" → "timesnewroman", "Helvetica" → Arial muadili. Linux'ta (web
-    # sunucusu) Microsoft fontları yok; aynı genişlikteki Liberation aileleri karşılığı.
-    sans, serif, mono = ("Arial", "Liberation Sans"), ("Times New Roman", "Liberation Serif"), \
-        ("Courier New", "Liberation Mono")
-    aliases = {"helvetica": sans, "helv": sans, "arial": sans, "times": serif, "timesroman": serif,
-               "timesnew": serif, "timesnewroman": serif, "courier": mono, "couriernew": mono,
-               "calibri": ("Calibri", "Carlito"), "cambria": ("Cambria", "Caladea")}
-    for family in aliases.get(key, ()):
-        if family in system_fonts():
-            return family
+    # "TimesNewRomanPSMT" → "timesnew", "Helvetica" → Arial muadili
+    aliases = {"helvetica": "Arial", "helv": "Arial", "times": "Times New Roman",
+               "timesroman": "Times New Roman", "timesnew": "Times New Roman", "courier": "Courier New"}
+    if key in aliases and aliases[key] in system_fonts():
+        return aliases[key]
     # En uzun ortak önek — "arialnarrow" > "arial"
     best = max(by_norm, key=lambda n: (key.startswith(n) or n.startswith(key)) * len(n), default=None)
     if best and (key.startswith(best) or best.startswith(key)) and len(best) >= 4:

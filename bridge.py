@@ -1,11 +1,7 @@
 """JS ↔ Python köprüsü — pywebview js_api olarak arayüze açılır.
 
-Masaüstünde (app.py) her public metot `window.pywebview.api.<ad>(...)` ile, webde (server.py)
-`POST /api/<ad>` ile çağrılır. pywebview public nitelikleri de dışarı açtığı için iç durum `_` ile
-başlayan adlarda tutulur.
-
-web=True iken dosya pencereleri ve Windows panosu yoktur: dosyalar yüklenir/indirilir, pano
-tarayıcıdadır (metin ve resim JS'ten parametre olarak gelir).
+JS tarafında her public metot `window.pywebview.api.<ad>(...)` ile çağrılır ve Promise döner.
+pywebview public nitelikleri de dışarı açtığı için iç durum `_` ile başlayan adlarda tutulur.
 
 Koordinatlar her zaman PDF noktası (pt, 1/72 inç) cinsindendir; ekran pikseline çevirmek
 arayüzün işi. Böylece yakınlaştırma Python tarafını hiç ilgilendirmez.
@@ -18,16 +14,11 @@ import tempfile
 import threading
 
 import fitz
+import webview
 
+import clipboard
 import fonts
-
 from editor import PDFEditor
-
-try:                        # masaüstüne özgü: webde (Linux sunucu) yüklü değil / çalışmaz
-    import webview
-    import clipboard
-except (ImportError, AttributeError, OSError):
-    webview = clipboard = None
 
 MAX_UNDO = 20
 MAX_RECENT = 10
@@ -77,21 +68,19 @@ class DocState:
 
 
 class Api:
-    def __init__(self, state: DocState, on_doc_changed=None, web: bool = False, max_undo: int = MAX_UNDO):
+    def __init__(self, state: DocState, on_doc_changed=None):
         self._state = state
-        self._web = web
-        self._max_undo = max_undo
-        self._window = None                       # webview.Window (yalnız masaüstü)
+        self._window: webview.Window | None = None
         self._undo: list[bytes] = []
         self._redo: list[bytes] = []
-        self._recent: list[str] = [] if web else _load_recent()
+        self._recent: list[str] = _load_recent()
         self._on_doc_changed = on_doc_changed   # sayfa önbelleğini temizlemek için
         # PDFim içinden kopyalanan son metin ve kaynağının biçimi: yapıştırırken aynı
         # metin panodaysa biçimiyle yapıştırılır (v1 ile aynı davranış)
         self._last_copied = ""
         self._last_style: dict | None = None
 
-    def _attach(self, window: "webview.Window"):
+    def _attach(self, window: webview.Window):
         self._window = window
 
     @property
@@ -216,19 +205,7 @@ class Api:
         self._update_title()
         return {"ok": ok, "error": ed.last_error, "state": self.get_state()}
 
-    def _export(self) -> tuple[bytes, str] | None:
-        """Web "İndir": belgenin tamamı (masaüstündeki kayıtla aynı ayarlar) + dosya adı."""
-        with self._state.lock:
-            ed = self._ed
-            if not ed.doc:
-                return None
-            data = ed.doc.tobytes(garbage=3, deflate=True)
-            ed.modified = False
-            return data, os.path.basename(ed.path) or "belge.pdf"
-
     def _add_recent(self, path: str):
-        if self._web:
-            return
         self._recent = ([path] + [p for p in self._recent if p != path])[:MAX_RECENT]
         try:
             os.makedirs(APPDATA_DIR, exist_ok=True)
@@ -296,10 +273,9 @@ class Api:
     # ── Kopyala / yapıştır ───────────────────────────────────────────────────
 
     def _copy(self, text: str, style: dict | None) -> dict:
-        """Masaüstünde panoya yazar; webde metni döndürür, JS tarayıcı panosuna yazar."""
         if not text:
             return {"ok": False, "error": "Kopyalanacak metin yok."}
-        if not self._web and not clipboard.set_text(text):
+        if not clipboard.set_text(text):
             return {"ok": False, "error": "Panoya yazılamadı — pano başka bir programda açık, biraz sonra tekrar deneyin."}
         self._last_copied, self._last_style = text, style
         return {"ok": True, "text": text}
@@ -329,21 +305,13 @@ class Api:
                 style = ed.style_at(page, rects[0]) if rects else None
         return self._copy(txt, style)
 
-    def clipboard_info(self, text: str | None = None, has_image: bool = False) -> dict:
-        """Panoda ne var? Resim önceliklidir (Ekran Alıntısı Aracı çoğu zaman ikisini de koyar).
-        Webde pano tarayıcıda okunur, içeriği parametre olarak gelir."""
-        if self._web:
-            if has_image:
-                return {"kind": "image"}
-            txt = text or ""
-            if not txt.strip():
-                return {"kind": None}
-        else:
-            if clipboard.has_image():
-                return {"kind": "image"}
-            txt = clipboard.get_text()
-            if not txt.strip():
-                return {"kind": None, "locked": clipboard.is_locked()}
+    def clipboard_info(self) -> dict:
+        """Panoda ne var? Resim önceliklidir (Ekran Alıntısı Aracı çoğu zaman ikisini de koyar)."""
+        if clipboard.has_image():
+            return {"kind": "image"}
+        txt = clipboard.get_text()
+        if not txt.strip():
+            return {"kind": None, "locked": clipboard.is_locked()}
         style = self._paste_style(txt)
         sp = {**PDFEditor.DEFAULT_TEXT_STYLE, **(style or {})}
         return {"kind": "text", "text": txt, "fromPdfim": style is not None,
@@ -363,27 +331,18 @@ class Api:
                 style = {**style, "color": 0x000000}
         return style
 
-    def paste_text(self, page: int, x: float, y_base: float, text: str | None = None) -> dict:
-        txt = text if self._web else clipboard.get_text()
-        txt = txt or ""
+    def paste_text(self, page: int, x: float, y_base: float) -> dict:
+        txt = clipboard.get_text()
         if not txt.strip():
             return {"ok": False, "error": "Panoda yapıştırılacak metin yok."}
         return self._mutate(page, self._ed.insert_new_text, page, (x, y_base), txt,
                             self._paste_style(txt))
 
-    def paste_image(self, page: int, at: list | None = None, data: str | None = None) -> dict:
-        """data: webde tarayıcı panosundaki resim (base64). Masaüstünde Windows panosundan."""
-        png = _b64(data) if self._web else clipboard.get_image_png()
+    def paste_image(self, page: int, at: list | None = None) -> dict:
+        png = clipboard.get_image_png()
         if not png:
             return {"ok": False, "error": "Panodaki resim okunamadı."}
         return self._insert_image(page, png, at)
-
-    def add_image_data(self, page: int, data: str) -> dict:
-        """Web: kullanıcının seçtiği resim dosyası (base64)."""
-        png = _b64(data)
-        if not png:
-            return {"ok": False, "error": "Resim okunamadı."}
-        return self._insert_image(page, png, None)
 
     # ── Resim ────────────────────────────────────────────────────────────────
 
@@ -484,7 +443,7 @@ class Api:
     def _snapshot(self):
         """_mutate çağırır, değişiklikten önce (kilit içinde)."""
         self._undo.append(self._ed.doc.tobytes())
-        del self._undo[:-self._max_undo]
+        del self._undo[:-MAX_UNDO]
         self._redo.clear()
 
     def _restore(self, src: list, dst: list) -> dict:
@@ -514,17 +473,6 @@ class Api:
             "Kaydedilmemiş değişiklikler",
             f"{os.path.basename(ed.path) or 'Belge'} dosyasındaki değişiklikler kaydedilmedi.\n"
             "Kaydetmeden devam edilsin mi?")
-
-
-def _b64(data: str | None) -> bytes | None:
-    import base64
-    import binascii
-    if not data:
-        return None
-    try:
-        return base64.b64decode(data.split(",", 1)[-1], validate=False)   # "data:image/png;base64," öneki olabilir
-    except (binascii.Error, ValueError):
-        return None
 
 
 def _stack_order(page: fitz.Page, spans: list, images: list):
