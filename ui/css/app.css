@@ -500,6 +500,15 @@ body:not(.has-doc) #status-pill { display: none; }
 }
 #toast.is-visible { opacity: 1; transform: none; }
 
+/* Yalnız web sürümünde görünenler (platform.js body'ye is-web ekler) */
+.web-only { display: none !important; }
+body.is-web .web-only { display: block !important; }
+body.is-web a.icon-btn.web-only { display: inline-grid !important; }
+.web-info { max-width: 420px; margin-top: var(--s-5); text-align: center; font-size: var(--fs-body-sm); color: var(--ink-3); }
+.web-info p { margin: 0 0 6px; }
+.web-links a { color: var(--primary); text-decoration: none; font-weight: 500; }
+.web-links a:hover { text-decoration: underline; }
+
 /* Boş ekrandaki son dosyalar */
 #recent-list { display: flex; flex-direction: column; gap: 2px; width: 380px; max-width: 90%; margin-top: var(--s-4); }
 #recent-list:empty { display: none; }

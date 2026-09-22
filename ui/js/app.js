@@ -104,7 +104,7 @@ async function handleOpenResult(result) {
   while (result && !result.ok && result.needsPassword) {
     const pw = window.prompt(`${result.error}\nParolayı girin:`);
     if (pw === null) return;
-    result = await api().open_path(result.path, pw);
+    result = await platform.reopen(result, pw);
   }
   if (!result) return;
   if (!result.ok) return showError(result.error);
@@ -320,20 +320,26 @@ function updateStatus() {
 /* ── Komutlar ─────────────────────────────────────────────────────────────── */
 
 const commands = {
-  async open() { commitOpenEdit(); handleOpenResult(await serial(() => api().open_dialog())); },
+  async open() {
+    commitOpenEdit();
+    // Masaüstünde bu soruyu Python sorar (dosya penceresinden önce); webde tarayıcı
+    if (IS_WEB && app.doc && app.doc.modified
+        && !window.confirm('Açık belgedeki değişiklikler indirilmedi. Yine de yeni dosya açılsın mı?')) return;
+    handleOpenResult(await serial(() => platform.openFile()));
+  },
   async save() {
     if (!app.doc) return;
     commitOpenEdit();                 // açık düzenleme önce uygulansın (sıra kuyruğu garanti eder)
-    const r = await serial(() => api().save());
+    const r = await serial(() => platform.save());
     if (!r) return;
-    if (r.ok) { applyState(r.state); toast('Kaydedildi'); return; }
+    if (r.ok) { applyState(r.state); toast(IS_WEB ? 'İndiriliyor' : 'Kaydedildi'); return; }
     // Dosya başka programda açıksa (Adobe, Outlook önizleme…) başka yere kaydetmeyi öner
     if (window.confirm(`Dosya kaydedilemedi.\n\n${r.error}\n\nFarklı bir yere kaydetmek ister misiniz?`)) commands.saveAs();
   },
   async saveAs() {
     if (!app.doc) return;
     commitOpenEdit();
-    if (await mutate(() => api().save_as())) toast('Kaydedildi');
+    if (await mutate(() => platform.saveAs())) toast(IS_WEB ? 'İndiriliyor' : 'Kaydedildi');
   },
   async undo() {
     commitOpenEdit();
@@ -346,7 +352,7 @@ const commands = {
   async addImage() {
     if (!app.doc) return;
     const i = app.current;
-    const r = await mutate(() => api().add_image(i), 'Resim eklendi · Sürükle: kılavuzlara yapışır · Alt: serbest');
+    const r = await mutate(() => platform.addImage(i), 'Resim eklendi · Sürükle: kılavuzlara yapışır · Alt: serbest');
     if (r) { setTool('secim'); selectImageNear(i, r.rect); }
   },
   copy() {
@@ -356,18 +362,7 @@ const commands = {
     toast('Önce bir metne tıklayın ya da Metin Seç (Ctrl+3) ile alan seçin.');
   },
   async paste() {
-    if (!app.doc) return;
-    const info = await api().clipboard_info();
-    if (info.kind === 'image') {
-      const i = app.current;
-      const r = await mutate(() => api().paste_image(i, null), 'Resim yapıştırıldı');
-      if (r) { setTool('secim'); selectImageNear(i, r.rect); }
-    } else if (info.kind === 'text') {
-      startPlacement(info);
-    } else {
-      toast(info.locked ? 'Pano başka bir programda açık — biraz sonra tekrar deneyin.'
-                        : 'Panoda yapıştırılacak metin veya resim yok.');
-    }
+    if (app.doc) usePasteInfo(await platform.readClipboard());
   },
   selectAll() { if (app.doc) selectPageText(app.current); },
   deleteSelected() {
@@ -383,6 +378,22 @@ const commands = {
   fitWidth() { fitZoom('width'); },
   fitPage() { fitZoom('page'); },
 };
+
+/** Panodaki içerikle yapıştır: resim ekrandaki sayfaya, metin önizlemeyle tıklanan yere */
+async function usePasteInfo(info) {
+  if (info.kind === 'image') {
+    const i = app.current;
+    const r = await mutate(() => platform.pasteImage(i, null, info), 'Resim yapıştırıldı');
+    if (r) { setTool('secim'); selectImageNear(i, r.rect); }
+  } else if (info.kind === 'text') {
+    startPlacement(info);
+  } else if (info.denied) {
+    toast('Tarayıcı panoyu okuma izni vermedi — Ctrl+V ile yapıştırın.');
+  } else {
+    toast(info.locked ? 'Pano başka bir programda açık — biraz sonra tekrar deneyin.'
+                      : 'Panoda yapıştırılacak metin veya resim yok.');
+  }
+}
 
 function setMode(mode) {
   app.mode = mode;
@@ -484,6 +495,7 @@ function onKey(e) {
   else if (key === 'z') commands.undo();
   else if (key === 'y') commands.redo();
   else if (key === 'c') commands.copy();
+  else if (key === 'v' && IS_WEB) handled = false;   // webde tarayıcının 'paste' olayı (izin istemez)
   else if (key === 'v') commands.paste();
   else if (key === 'a') commands.selectAll();
   else if (key === 'i') commands.addImage();
@@ -510,4 +522,8 @@ app.tool = null;
 setTool('secim');
 applyState(null);
 
-window.addEventListener('pywebviewready', async () => applyState(await api().get_state()));
+if (IS_WEB) {
+  initWeb().then(async () => applyState(await api().get_state()));
+} else {
+  window.addEventListener('pywebviewready', async () => applyState(await api().get_state()));
+}

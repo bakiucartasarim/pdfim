@@ -2,6 +2,8 @@
 
 import os
 import re
+import subprocess
+import sys
 
 try:
     import winreg
@@ -34,9 +36,9 @@ def system_fonts() -> dict:
     if _cache is not None:
         return _cache
     fams: dict = {}
-    if winreg is None:
-        _cache = fams
-        return fams
+    if winreg is None:                       # Linux (web sunucusu): fontconfig
+        _cache = _scan_fontconfig()
+        return _cache
     # HKCU: kullanıcının yönetici yetkisi olmadan kurduğu fontlar
     for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
         try:
@@ -67,6 +69,46 @@ def system_fonts() -> dict:
                     fams.setdefault(name, {}).setdefault(style, path)
     _cache = fams
     return fams
+
+
+def _scan_fontconfig() -> dict:
+    """fc-list çıktısından aile → (kalın, italik) → dosya. Light/Medium gibi ara
+    ağırlıklar atlanır; biçim çubuğunda yalnız normal/kalın/italik seçiliyor."""
+    try:
+        out = subprocess.run(["fc-list", "--format", "%{family[0]}\\t%{style[0]}\\t%{file}\\n"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    fams: dict = {}
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3 or not parts[2].lower().endswith((".ttf", ".otf", ".ttc")):
+            continue
+        family, style, path = parts[0].strip(), parts[1].lower(), parts[2]
+        bold = "bold" in style
+        italic = "italic" in style or "oblique" in style
+        rest = re.sub(r"bold|italic|oblique", "", style).strip()
+        if family and rest in ("", "regular", "book", "roman", "normal"):
+            fams.setdefault(family, {}).setdefault((bold, italic), path)
+    return fams
+
+
+# Metin yazılırken son çare: belgedeki font da eşleşen sistem fontu da karakteri
+# içermiyorsa. Liberation Sans, Arial ile aynı genişliklerde (Linux'taki karşılığı).
+_FALLBACK_FAMILIES = ("Arial", "Liberation Sans", "DejaVu Sans", "Noto Sans")
+
+
+def fallback_file(bold: bool, italic: bool) -> str | None:
+    for family in _FALLBACK_FAMILIES:
+        path = font_file(family, bold, italic)
+        if path:
+            return path
+    if sys.platform == "win32":              # kayıt defteri okunamadıysa bile Arial oradadır
+        name = {(False, False): "arial", (True, False): "arialbd",
+                (False, True): "ariali", (True, True): "arialbi"}[(bold, italic)]
+        path = os.path.join(_FONTS_DIR, name + ".ttf")
+        return path if os.path.exists(path) else None
+    return None
 
 
 def font_file(family: str, bold: bool, italic: bool) -> str | None:

@@ -8,7 +8,27 @@
 const PT_TO_PX = 96 / 72;          // %100 yakınlaştırmada 1 pt kaç CSS pikseli
 
 const $ = (id) => document.getElementById(id);
-const api = () => window.pywebview && window.pywebview.api;
+
+/* Masaüstünde sayfa /<belirteç>/ui/ altından (page_server.py), webde /ui/ altından (server.py) gelir */
+const IS_WEB = location.pathname.startsWith('/ui/');
+
+/* Webde köprü metotları HTTP üzerinden: api().replace_text(a, b) → POST /api/replace_text [a, b] */
+const httpApi = new Proxy({}, {
+  get: (_, name) => async (...args) => {
+    const res = await fetch(`../api/${name}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args),
+    });
+    if (!res.ok) {
+      let msg = res.statusText;
+      try { const j = await res.json(); msg = j.detail || j.error || msg; } catch (_) { /* gövde yok */ }
+      if (res.status === 429) return { ok: false, error: msg };
+      throw new Error(msg);
+    }
+    return res.json();
+  },
+});
+
+const api = () => (IS_WEB ? httpApi : window.pywebview && window.pywebview.api);
 
 const app = window.app = {
   doc: null,          // Python get_state() çıktısı; belge yoksa null

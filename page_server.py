@@ -30,9 +30,10 @@ class PageCache:
     """(revizyon, sayfa, ölçek) → PNG baytları. Belge her değiştiğinde revizyon artar,
     eski girdiler bir daha istenmez ve zamanla dışarı itilir."""
 
-    def __init__(self):
+    def __init__(self, limit: int = _CACHE_LIMIT):
         self._items: OrderedDict[tuple, bytes] = OrderedDict()
         self._bytes = 0
+        self._limit = limit
         # Sunucu her isteği ayrı iş parçacığında karşılar; clear() ise köprüden gelir
         self._lock = threading.Lock()
 
@@ -60,7 +61,7 @@ class PageCache:
         """En uzun süredir kullanılmayanları at (self._items en eskiden en yeniye sıralı;
         kilit içinde çağrılır). Tarayıcı da kendi önbelleğini tuttuğu için bu yalnız
         "geri dönülen sayfa yeniden çizilmesin" diye var; küçük bir sınır yeter."""
-        while self._bytes > _CACHE_LIMIT and len(self._items) > 1:
+        while self._bytes > self._limit and len(self._items) > 1:
             _, old = self._items.popitem(last=False)
             self._bytes -= len(old)
 
@@ -93,14 +94,9 @@ class PageServer:
         data = self.cache.get(key)
         if data is not None:
             return data
-        # MuPDF aynı belgeye iki iş parçacığından aynı anda dokunulmasına dayanıklı değil;
-        # köprüdeki düzenleme işlemleri de aynı kilidi tutar.
-        with self.state.lock:
-            ed = self.state.editor
-            if not ed.doc or not 0 <= page_num < ed.page_count() \
-                    or version != self.state.version(page_num):
-                return None
-            data = ed.render_page(page_num, scale)
+        data = self.state.render(page_num, scale, version)
+        if data is None:
+            return None
         self.cache.put(key, data)
         return data
 

@@ -31,6 +31,7 @@
       <button type="button" id="btn-undo" class="icon-btn" title="Geri al (Ctrl+Z)" disabled><span class="ms">undo</span></button>
       <button type="button" id="btn-redo" class="icon-btn" title="Yinele (Ctrl+Y)" disabled><span class="ms">redo</span></button>
     </div>
+    <a id="link-source-top" class="icon-btn web-only" target="_blank" rel="noopener" title="Açık kaynak (AGPL-3.0) — kaynak kod"><span class="ms">code</span></a>
     <button type="button" id="btn-open" class="btn" title="Aç (Ctrl+O)"><span class="ms">folder_open</span><span class="label">Aç</span></button>
     <button type="button" id="btn-save" class="btn btn-primary" title="Kaydet (Ctrl+S) · Farklı kaydet (Ctrl+Shift+S)" disabled><span class="ms">save</span><span class="label">Kaydet</span></button>
   </div>
@@ -83,6 +84,10 @@
       <button type="button" id="btn-open-empty" class="btn btn-primary btn-lg"><span class="ms">folder_open</span><span>PDF Aç</span></button>
       <p class="empty-hint">Ctrl+O</p>
       <div id="recent-list"></div>
+      <div class="web-only web-info">
+        <p id="web-note"></p>
+        <p class="web-links">Açık kaynak (AGPL-3.0) · <a id="link-source" target="_blank" rel="noopener">Kaynak kod</a> · <a id="link-desktop" target="_blank" rel="noopener">Masaüstü sürümünü indir</a></p>
+      </div>
     </div>
 
     <div id="zoom-bar">
@@ -141,6 +146,7 @@
 </div>
 
 <script src="js/core.js"></script>
+<script src="js/platform.js"></script>
 <script src="js/menu.js"></script>
 <script src="js/editbox.js"></script>
 <script src="js/layer.js"></script>

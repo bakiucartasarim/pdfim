@@ -276,7 +276,7 @@ class PDFEditor:
             if family:
                 candidates.append(self._file_kwargs(fonts.font_file(family, b, i)))
             candidates.append(self._find_system_font(span_info.get("font", ""), b, i))
-        candidates.append(self._file_kwargs(os.path.join(_FONTS_DIR, _ARIAL_VARIANTS[(b, i)])))
+        candidates.append(self._file_kwargs(fonts.fallback_file(b, i)))
         candidates = [c for c in candidates if c]
         for kw in candidates:
             if self._covers(kw, text):
@@ -547,8 +547,8 @@ class PDFEditor:
         if not result:
             text = span_info.get("text", "")
             if any(ord(c) > 127 for c in text):
-                f = os.path.join(_FONTS_DIR, _ARIAL_VARIANTS[(is_bold, is_italic)])
-                if os.path.exists(f):
+                f = fonts.fallback_file(is_bold, is_italic)
+                if f:
                     result = {"fontfile": f, "fontname": f"PDFimArial{int(is_bold)}{int(is_italic)}"}
             if not result:
                 result = {"fontname": "helv"}
