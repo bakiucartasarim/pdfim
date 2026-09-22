@@ -410,7 +410,12 @@ function onDblClick(e, i, layer) {
   if (!d) return;
   const [x, y] = ptAt(e, layer);
   const span = spanAt(d, x, y);
-  if (span) openEditor(i, span, null);
+  if (span) return openEditor(i, span, null);
+  if (pickAt(d, x, y).img) return;
+  // Tepkisiz kalınca "düzenleme çalışmıyor" sanılıyor: nedenini söyle
+  toast(d.spans.length
+    ? 'Burada düzenlenebilir metin yok · Yeni yazı için Metin Ekle (Ctrl+2)'
+    : 'Bu sayfadaki yazılar çizim olarak kaydedilmiş (ör. CAD çıktısı), metin olarak düzenlenemez · Yeni yazı için Metin Ekle (Ctrl+2)');
 }
 
 function updateHover(i, layer, x, y) {
