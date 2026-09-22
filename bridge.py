@@ -23,6 +23,7 @@ import clipboard
 import fonts
 from editor import PDFEditor, TEXT_ONLY
 
+VERSION = "2.0"          # setup.iss MyAppVersion ile aynı olmalı
 MAX_UNDO = 20
 MAX_RECENT = 10
 MAX_RENDER_PIXELS = 40_000_000   # ≈ 160 MB RGBA; 4K ekranda A4 %400'ün rahatça üstünde
@@ -98,7 +99,7 @@ class Api:
         with self._state.lock:
             ed = self._ed
             if not ed.doc:
-                return {"open": False, "recent": self._recent}
+                return {"open": False, "recent": self._recent, "version": VERSION}
             return {
                 "open": True,
                 "path": ed.path,
@@ -111,6 +112,7 @@ class Api:
                 "pages": [[p.rect.width, p.rect.height] for p in ed.doc],
                 "rotations": [p.rotation for p in ed.doc],
                 "recent": self._recent,
+                "version": VERSION,
             }
 
     def _reloaded(self):

@@ -1,5 +1,5 @@
 PyMuPDF==1.27.2.3
-PyQt6==6.11.0
+PyQt6==6.11.0          # yalnız v1 arayüzü (main.py) için; v2 kullanmıyor
 pywebview==6.2.1
 # Sadece exe/kurulum derlemek için
 pyinstaller==6.21.0

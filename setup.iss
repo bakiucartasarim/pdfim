@@ -1,5 +1,5 @@
 #define MyAppName      "PDFim"
-#define MyAppVersion   "1.7"
+#define MyAppVersion   "2.0"
 #define MyAppPublisher "PDFim"
 #define MyAppExeName   "PDFim.exe"
 #define MyAppURL       ""
@@ -74,6 +74,34 @@ Root: HKCU; Subkey: "Software\{#MyAppPublisher}\{#MyAppName}"; ValueType: string
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// PDFim v2'nin arayüzü Windows'un WebView2 bileşenini kullanır. Windows 11 ve güncel
+// Windows 10'da kuruludur; çok eski kurulumlarda eksik olabilir.
+function WebView2Installed(): Boolean;
+var
+  Value: String;
+begin
+  Result :=
+    RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Value) or
+    RegQueryStringValue(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Value) or
+    RegQueryStringValue(HKCU, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Value);
+end;
+
+function InitializeSetup(): Boolean;
+var
+  Err: Integer;
+begin
+  Result := True;
+  if not WebView2Installed() then
+  begin
+    if MsgBox('PDFim, Microsoft Edge WebView2 bileşenini kullanır ve bu bilgisayarda bulunamadı.' + #13#10 +
+              'Kurulum sayfasını şimdi açmak ister misiniz? (Kurduktan sonra PDFim kurulumunu tekrar çalıştırın)',
+              mbConfirmation, MB_YESNO) = IDYES then
+      ShellExec('open', 'https://developer.microsoft.com/microsoft-edge/webview2/', '', '', SW_SHOW, ewNoWait, Err);
+    Result := False;
+  end;
+end;
 
 [UninstallDelete]
 Type: dirifempty; Name: "{app}"

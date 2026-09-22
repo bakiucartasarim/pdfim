@@ -37,6 +37,7 @@ function applyState(state) {
     buildPages();
     renderInspector();
     renderRecent(state ? state.recent : []);
+    if (state && state.version) $('app-version').textContent = state.version;
     return;
   }
   const rebuild = !prev || prev.gen !== doc.gen || prev.pages.length !== doc.pages.length;
