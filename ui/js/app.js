@@ -316,6 +316,7 @@ function updateStatus() {
   let hint = TOOL_HINTS[app.tool];
   if (app.mode === 'sayfalar') hint = 'Sürükleyerek sıralayın · Ctrl/Shift ile çoklu seçim · Çift tık: düzenle';
   if (app.mode === 'form') hint = formHint();
+  if (app.mode === 'aciklama') hint = annotHint();
   if (app.placing) hint = app.placing.kind === 'image' ? 'İmzanın ortası tıkladığınız yere gelir · Esc: vazgeç'
     : 'Yerleştirilecek yere tıklayın · Metin kenarlarına yapışır · Esc: vazgeç';
   else if (isEditing()) hint = 'Enter: uygula · Esc: vazgeç';
@@ -394,7 +395,7 @@ async function usePasteInfo(info) {
   }
 }
 
-const READY_MODES = new Set(['duzenle', 'sayfalar', 'form']);
+const READY_MODES = new Set(['duzenle', 'sayfalar', 'form', 'aciklama']);
 
 function setMode(mode) {
   if (!READY_MODES.has(mode)) {
@@ -411,6 +412,10 @@ function setMode(mode) {
   if (mode === 'sayfalar') enterPagesMode();
   else if (prev === 'sayfalar') leavePagesMode();
   document.body.classList.toggle('mode-form', mode === 'form');
+  document.body.classList.toggle('mode-aciklama', mode === 'aciklama');
+  if (prev === 'aciklama') { closeNotePop(false); app.annotSel = null; app.annotHover = null; }
+  if (mode === 'aciklama') { clearTransient(); renderAllLayers(); }
+  else if (prev === 'aciklama') renderAllLayers();
   if (mode === 'form') { clearTransient(); renderAllLayers(); }
   else if (prev === 'form') renderAllLayers();       // alan kutuları kalksın
   renderInspector();
@@ -492,6 +497,7 @@ function bind() {
   bindFormatBar();
   bindPageGrid();
   bindForm();
+  bindAnnot();
   bindSignature();
 }
 
@@ -503,6 +509,10 @@ function onKey(e) {
   const key = e.key.toLowerCase();
   let handled = true;
   // Sayfalar modunun kendi tuşları (Del, Esc, Ctrl+A, Ctrl+D); geri kalanı (Ctrl+Z…) aşağıda
+  if (app.mode === 'aciklama' && app.doc && !inField && !e.ctrlKey && onAnnotKey(e)) {
+    e.preventDefault();
+    return;
+  }
   if (app.mode === 'sayfalar' && app.doc && !inField && onPagesKey(e, key)) {
     e.preventDefault();
     return;

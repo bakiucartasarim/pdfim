@@ -667,6 +667,136 @@ class PDFEditor:
         self.modified = True
         return []
 
+    # ── Açıklamalar (vurgu, not, şekil, serbest çizim) ────────────────────────
+    # Standart PDF açıklama nesneleri: diğer programlarda da ayrı öğe olarak görünür,
+    # taşınır, silinir. Renkler 0xRRGGBB tamsayı.
+
+    _ANNOT_KINDS = {
+        fitz.PDF_ANNOT_HIGHLIGHT: "highlight", fitz.PDF_ANNOT_UNDERLINE: "underline",
+        fitz.PDF_ANNOT_STRIKE_OUT: "strikeout", fitz.PDF_ANNOT_SQUIGGLY: "squiggly",
+        fitz.PDF_ANNOT_TEXT: "note", fitz.PDF_ANNOT_FREE_TEXT: "freetext",
+        fitz.PDF_ANNOT_SQUARE: "rect", fitz.PDF_ANNOT_CIRCLE: "ellipse",
+        fitz.PDF_ANNOT_LINE: "line", fitz.PDF_ANNOT_INK: "ink",
+        fitz.PDF_ANNOT_POLYGON: "polygon", fitz.PDF_ANNOT_POLY_LINE: "polyline",
+        fitz.PDF_ANNOT_STAMP: "stamp",
+    }
+    # set_rect ile taşınabilenler (işaretleme, çizgi ve serbest çizimin şekli noktalarla tanımlı)
+    MOVABLE_ANNOTS = {"note", "freetext", "rect", "ellipse", "stamp"}
+
+    @staticmethod
+    def _rgb(color: int) -> tuple:
+        return (((color >> 16) & 255) / 255, ((color >> 8) & 255) / 255, (color & 255) / 255)
+
+    @staticmethod
+    def _hex(rgb) -> int | None:
+        if not rgb:
+            return None
+        r, g, b = (list(rgb) + [0, 0, 0])[:3]
+        return (round(r * 255) << 16) | (round(g * 255) << 8) | round(b * 255)
+
+    def get_annots(self, page_num: int) -> list:
+        out = []
+        for a in self.doc[page_num].annots() or []:
+            kind = self._ANNOT_KINDS.get(a.type[0])
+            if not kind:
+                continue
+            r, colors = a.rect, a.colors or {}
+            info = a.info or {}
+            out.append({"xref": a.xref, "kind": kind, "rect": (r.x0, r.y0, r.x1, r.y1),
+                        "color": self._hex(colors.get("stroke")), "fill": self._hex(colors.get("fill")),
+                        "content": info.get("content", ""), "author": info.get("title", ""),
+                        "width": (a.border or {}).get("width") or 0,
+                        "movable": kind in self.MOVABLE_ANNOTS})
+        return out
+
+    def _finish(self, annot, color: int | None, width: float | None = None, fill: int | None = None):
+        if color is not None:
+            annot.set_colors(stroke=self._rgb(color), fill=self._rgb(fill) if fill is not None else None)
+        if width:
+            annot.set_border(width=width)
+        annot.set_info(title="PDFim")
+        annot.update()
+        self.modified = True
+        return True
+
+    def add_markup(self, page_num: int, rect: tuple, kind: str, color: int) -> bool:
+        """Dikdörtgenin içindeki kelimeleri satır satır vurgula / altını / üstünü çiz"""
+        page = self.doc[page_num]
+        sel = fitz.Rect(rect)
+        sel.normalize()
+        words = [w for w in page.get_text("words")
+                 if sel.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
+        if not words:
+            raise ValueError("Seçilen alanda metin yok.")
+        words.sort(key=lambda w: ((w[1] + w[3]) / 2, w[0]))
+        rows: list[list] = []
+        for w in words:                                  # aynı hizadaki kelimeler tek satır
+            cy, h = (w[1] + w[3]) / 2, w[3] - w[1]
+            if rows and abs(cy - (rows[-1][1] + rows[-1][3]) / 2) <= h * 0.5:
+                last = rows[-1]
+                rows[-1] = [min(last[0], w[0]), min(last[1], w[1]), max(last[2], w[2]), max(last[3], w[3])]
+            else:
+                rows.append(list(w[:4]))
+        add = {"highlight": page.add_highlight_annot, "underline": page.add_underline_annot,
+               "strikeout": page.add_strikeout_annot}[kind]
+        return self._finish(add([fitz.Rect(r) for r in rows]), color)
+
+    def add_note(self, page_num: int, point: tuple, text: str, color: int) -> bool:
+        page = self.doc[page_num]          # sayfa nesnesi yaşamalı: açıklama ona bağlı
+        annot = page.add_text_annot(fitz.Point(point), text, icon="Comment")
+        return self._finish(annot, color)
+
+    def add_shape(self, page_num: int, kind: str, a: tuple, b: tuple, color: int, width: float) -> bool:
+        page = self.doc[page_num]
+        if kind in ("rect", "ellipse"):
+            r = fitz.Rect(a, b)
+            r.normalize()
+            if r.width < 2 or r.height < 2:
+                raise ValueError("Şekil çok küçük.")
+            annot = (page.add_rect_annot if kind == "rect" else page.add_circle_annot)(r)
+        else:
+            if abs(a[0] - b[0]) + abs(a[1] - b[1]) < 2:
+                raise ValueError("Çizgi çok kısa.")
+            annot = page.add_line_annot(fitz.Point(a), fitz.Point(b))
+            if kind == "arrow":
+                annot.set_line_ends(fitz.PDF_ANNOT_LE_NONE, fitz.PDF_ANNOT_LE_OPEN_ARROW)
+        return self._finish(annot, color, width)
+
+    def add_ink(self, page_num: int, strokes: list, color: int, width: float) -> bool:
+        strokes = [[(float(x), float(y)) for x, y in s] for s in strokes if len(s) >= 2]
+        if not strokes:
+            raise ValueError("Çizim çok kısa.")
+        page = self.doc[page_num]
+        annot = page.add_ink_annot(strokes)
+        return self._finish(annot, color, width)
+
+    def update_annot(self, page_num: int, xref: int, changes: dict) -> bool:
+        page = self.doc[page_num]
+        annot = page.load_annot(int(xref))
+        if annot is None:
+            raise ValueError("Açıklama bulunamadı.")
+        if "rect" in changes:
+            annot.set_rect(fitz.Rect(changes["rect"]))
+        if "content" in changes:
+            annot.set_info(content=str(changes["content"]))
+        if "color" in changes:
+            kind = self._ANNOT_KINDS.get(annot.type[0])
+            fill = (annot.colors or {}).get("fill")
+            annot.set_colors(stroke=self._rgb(int(changes["color"])),
+                             fill=fill if kind in ("rect", "ellipse") else None)
+        annot.update()
+        self.modified = True
+        return True
+
+    def delete_annot(self, page_num: int, xref: int) -> bool:
+        page = self.doc[page_num]
+        annot = page.load_annot(int(xref))
+        if annot is None:
+            raise ValueError("Açıklama bulunamadı.")
+        page.delete_annot(annot)
+        self.modified = True
+        return True
+
     # ── Kaydet / Kapat ────────────────────────────────────────────────────────
 
     def content_rect(self, page_num: int) -> tuple:

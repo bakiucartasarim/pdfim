@@ -520,6 +520,30 @@ body:not(.has-doc) #status-pill { display: none; }
 .recent-dir { font-size: var(--fs-label-sm); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-text { display: flex; flex-direction: column; min-width: 0; }
 
+/* ── Açıklama & Not modu (annot.js) ──────────────────────────────────────── */
+
+#annot-strip { display: flex; align-items: center; gap: 2px; padding: 0 var(--s-3); background: var(--panel); border-bottom: 1px solid var(--border); min-width: 0; }
+body:not(.mode-aciklama) #annot-strip, body.mode-aciklama #tool-strip { display: none; }
+#annot-colors { display: flex; gap: 5px; margin: 0 6px; }
+#annot-colors button, .annot-swatches button { width: 20px; height: 20px; padding: 0; border: 2px solid #fff; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1px var(--border); }
+#annot-colors button.is-active, .annot-swatches button.is-active { box-shadow: 0 0 0 2px var(--primary); }
+#annot-width { height: 28px; width: 70px; margin-left: 4px; }
+.annot-swatches { display: flex; gap: 8px; }
+.annot-content { width: 100%; resize: vertical; min-height: 64px; padding: 6px; font-family: var(--font-ui); }
+#pages[data-atool] .layer { cursor: crosshair; }
+#pages[data-atool="secim"] .layer { cursor: default; }
+#pages[data-atool="note"] .layer { cursor: copy; }
+.annot-hover { outline: 1.5px dashed rgba(79, 70, 229, 0.55); }
+.annot-sel { outline: 2px solid var(--primary); background: rgba(79, 70, 229, 0.06); }
+.annot-marquee { background: color-mix(in srgb, var(--c) 28%, transparent); outline: 1px dashed var(--c); }
+.annot-preview { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: visible; }
+.note-pop { position: absolute; z-index: 25; width: 240px; padding: 8px; border: 1px solid #fde68a; border-radius: var(--r-md); background: #fffbeb; box-shadow: var(--shadow-3); }
+.note-pop textarea { width: 100%; resize: vertical; padding: 6px; border: 1px solid #fcd34d; border-radius: var(--r-sm); background: #fff; font: 13px/1.4 var(--font-ui); }
+.note-pop textarea:focus { outline: 2px solid var(--primary); border-color: transparent; }
+.note-pop-bar { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.note-pop-bar .btn { height: 28px; padding: 0 10px; }
+.field-name .ms { font-size: 16px; vertical-align: -3px; margin-right: 6px; color: var(--ink-3); }
+
 /* ── Form & İmza modu (form.js, signature.js) ─────────────────────────────── */
 
 #form-strip { display: flex; align-items: center; gap: 2px; padding: 0 var(--s-3); background: var(--panel); border-bottom: 1px solid var(--border); min-width: 0; }
@@ -866,6 +890,9 @@ body.is-page-dragging, body.is-page-dragging .pcard { cursor: grabbing; }
 
 @media (max-width: 1180px) {
   #tool-strip .label, #zoom-bar .label, #page-strip .label, #form-strip .label { display: none; }
+}
+@media (max-width: 1560px) {
+  #annot-strip .label { display: none; }
   .tool-btn { padding: 0 8px; }
   #mode-tabs button { padding: 0 10px; }
 }

@@ -117,6 +117,7 @@ function renderLayer(i) {
     add(boxEl(`marquee${app.tool === 'alan-sil' ? ' is-erase' : ''}`, normRect(dr.start, dr.cur)));
   }
   if (app.placing && app.placing.pos && app.placing.pos.page === i) renderPlacement(add, app.placing);
+  renderAnnots(i, add);
   renderFields(i, layer);
 }
 
@@ -300,7 +301,7 @@ function capture(layer, e) {
   try { layer.setPointerCapture(e.pointerId); } catch (_) { /* işaretçi zaten bırakılmış */ }
 }
 
-const fromEditor = (e) => e.target.closest('.edit-box, #fmt-bar');
+const fromEditor = (e) => e.target.closest('.edit-box, #fmt-bar, .note-pop');
 
 /** Döndürülmüş sayfada düzenleme henüz yok (bridge.page_layer): yanlış yere yazmak yerine söyle */
 function rotatedPage(i) {
@@ -325,6 +326,7 @@ function onDown(e, i, layer) {
     return;
   }
   if (app.mode === 'form') return;              // form alanları kendi kutularıyla çalışır
+  if (app.mode === 'aciklama') return annotDown(e, i, layer, x, y);
   const d = layerData(i);
   const tool = app.tool;
 
@@ -378,6 +380,7 @@ function onMove(e, i, layer) {
     return;
   }
 
+  if (app.mode === 'aciklama') return annotMove(e, i, layer, x, y);
   const dr = app.drag;
   if (!dr) { if (app.mode !== 'form') updateHover(i, layer, x, y); return; }
   if (dr.page !== i) return;
@@ -401,6 +404,7 @@ function onMove(e, i, layer) {
 }
 
 function onUp(e, i, layer) {
+  if (app.mode === 'aciklama') return annotUp(e, i, layer);
   const dr = app.drag;
   if (!dr || dr.page !== i) return;
   app.drag = null;
@@ -428,7 +432,7 @@ function onUp(e, i, layer) {
 }
 
 function onDblClick(e, i, layer) {
-  if (fromEditor(e) || app.mode === 'form' || (app.tool !== 'secim' && app.tool !== 'metin')) return;
+  if (fromEditor(e) || app.mode === 'form' || app.mode === 'aciklama' || (app.tool !== 'secim' && app.tool !== 'metin')) return;
   const d = layerData(i);
   if (d && d.rotated) return;             // uyarıyı ilk tıklama zaten gösterdi
   if (!d) return;
@@ -483,7 +487,7 @@ async function onContextMenu(e, i, layer) {
   e.preventDefault();
   if (fromEditor(e) || rotatedPage(i)) return;
   if (app.placing) { endPlacement(); return; }   // sağ tık yapıştırmayı iptal eder
-  if (app.mode === 'form') return;
+  if (app.mode === 'form' || app.mode === 'aciklama') return;
   const [x, y] = ptAt(e, layer);
   const d = layerData(i);
   const items = [];

@@ -12,6 +12,7 @@ function renderInspector() {
   }
   if (app.mode === 'sayfalar') return renderPagesInspector(body);
   if (app.mode === 'form') return renderFormInspector(body);
+  if (app.mode === 'aciklama') return renderAnnotInspector(body);
   if (!sel) {
     const [w, h] = app.doc.pages[app.current];
     body.append(

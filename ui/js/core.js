@@ -41,11 +41,12 @@ function serial(fn) {
   return p;
 }
 
-/** Değiştiren bir köprü çağrısı: sırala, sonucu uygula, hatayı göster. Başarıda sonucu döner. */
-async function mutate(call, okMsg) {
+/** Değiştiren bir köprü çağrısı: sırala, sonucu uygula, hatayı göster. Başarıda sonucu döner.
+ *  soft: beklenen durumlar (ör. "seçilen alanda metin yok") uyarı penceresi yerine alt köşede. */
+async function mutate(call, okMsg, soft = false) {
   const r = await serial(call);
   if (!r) return null;                 // kullanıcı iletişim kutusunda vazgeçti
-  if (!r.ok) { showError(r.error); return null; }
+  if (!r.ok) { if (soft) toast(r.error); else showError(r.error); return null; }
   applyState(r.state);
   if (okMsg) toast(okMsg);
   return r;

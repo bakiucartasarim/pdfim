@@ -51,6 +51,27 @@
   <button type="button" id="btn-inspector" class="icon-btn" title="Özellikler panelini aç / kapat"><span class="ms">tune</span></button>
 </div>
 
+<!-- Açıklama & Not modu şeridi (annot.js) -->
+<div id="annot-strip" role="toolbar" aria-label="Açıklama araçları">
+  <button type="button" class="tool-btn" data-atool="secim" title="Seç: açıklamaya tıkla, taşı, sil"><span class="ms">arrow_selector_tool</span><span class="label">Seç</span></button>
+  <span class="strip-sep"></span>
+  <button type="button" class="tool-btn" data-atool="highlight" title="Vurgula: metnin üstünden sürükle"><span class="ms">ink_highlighter</span><span class="label">Vurgula</span></button>
+  <button type="button" class="tool-btn" data-atool="underline" title="Altını çiz"><span class="ms">format_underlined</span><span class="label">Altı Çizili</span></button>
+  <button type="button" class="tool-btn" data-atool="strikeout" title="Üstünü çiz"><span class="ms">strikethrough_s</span><span class="label">Üstü Çizili</span></button>
+  <button type="button" class="tool-btn" data-atool="note" title="Not: tıklanan yere"><span class="ms">sticky_note_2</span><span class="label">Not</span></button>
+  <span class="strip-sep"></span>
+  <button type="button" class="tool-btn" data-atool="rect" title="Dikdörtgen"><span class="ms">rectangle</span><span class="label">Dikdörtgen</span></button>
+  <button type="button" class="tool-btn" data-atool="ellipse" title="Elips"><span class="ms">circle</span><span class="label">Elips</span></button>
+  <button type="button" class="tool-btn" data-atool="line" title="Çizgi"><span class="ms">horizontal_rule</span><span class="label">Çizgi</span></button>
+  <button type="button" class="tool-btn" data-atool="arrow" title="Ok"><span class="ms">arrow_right_alt</span><span class="label">Ok</span></button>
+  <button type="button" class="tool-btn" data-atool="ink" title="Serbest çizim"><span class="ms">draw</span><span class="label">Serbest</span></button>
+  <span class="strip-sep"></span>
+  <div id="annot-colors" role="group" aria-label="Renk"></div>
+  <select id="annot-width" class="fmt-input" title="Çizgi kalınlığı">
+    <option value="1">1 pt</option><option value="2" selected>2 pt</option><option value="3">3 pt</option><option value="5">5 pt</option>
+  </select>
+</div>
+
 <!-- Form & İmza modu şeridi (form.js) -->
 <div id="form-strip" role="toolbar" aria-label="Form ve imza">
   <button type="button" class="tool-btn tool-accent" data-fact="signature" title="Çizerek, yazarak ya da resimden imza ekle"><span class="ms">signature</span><span class="label">İmza Ekle</span></button>
@@ -237,6 +258,7 @@
 <script src="js/pages.js"></script>
 <script src="js/form.js"></script>
 <script src="js/signature.js"></script>
+<script src="js/annot.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

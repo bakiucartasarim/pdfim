@@ -296,6 +296,31 @@ class Api:
             pass
         return {"ok": True}
 
+    # ── Açıklama & Not ───────────────────────────────────────────────────────
+
+    def add_markup(self, page: int, rect: list, kind: str, color: int) -> dict:
+        if kind not in ("highlight", "underline", "strikeout"):
+            return {"ok": False, "error": "Geçersiz işaretleme türü."}
+        return self._mutate(page, self._ed.add_markup, page, tuple(rect), kind, int(color))
+
+    def add_note(self, page: int, x: float, y: float, text: str, color: int) -> dict:
+        return self._mutate(page, self._ed.add_note, page, (x, y), str(text), int(color))
+
+    def add_shape(self, page: int, kind: str, a: list, b: list, color: int, width: float) -> dict:
+        if kind not in ("rect", "ellipse", "line", "arrow"):
+            return {"ok": False, "error": "Geçersiz şekil."}
+        return self._mutate(page, self._ed.add_shape, page, kind, tuple(a), tuple(b), int(color), float(width))
+
+    def add_ink(self, page: int, strokes: list, color: int, width: float) -> dict:
+        return self._mutate(page, self._ed.add_ink, page, strokes, int(color), float(width))
+
+    def update_annot(self, page: int, xref: int, changes: dict) -> dict:
+        allowed = {k: v for k, v in (changes or {}).items() if k in ("rect", "content", "color")}
+        return self._mutate(page, self._ed.update_annot, page, int(xref), allowed)
+
+    def delete_annot(self, page: int, xref: int) -> dict:
+        return self._mutate(page, self._ed.delete_annot, page, int(xref))
+
     def open_dropped(self, path: str) -> dict | None:
         """Pencereye bırakılan PDF (Düzenle modu): kaydedilmemiş değişiklik varsa sorar"""
         if not self._confirm_discard():
@@ -411,6 +436,7 @@ class Api:
                 ys += [by0, by1]
             return {"version": self._state.version(page), "spans": spans,
                     "fields": ed.get_fields(page),
+                    "annots": ed.get_annots(page),
                     "images": images, "snapX": xs, "snapY": ys,
                     "content": [cx0, cy0, cx1, cy1]}
 
