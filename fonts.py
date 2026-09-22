@@ -2,6 +2,7 @@
 
 import os
 import re
+import sys
 
 try:
     import winreg
@@ -69,6 +70,23 @@ def system_fonts() -> dict:
     return fams
 
 
+# Metin yazılırken son çare: belgedeki font da eşleşen sistem fontu da karakteri içermiyorsa
+_FALLBACK_FAMILIES = ("Arial", "Segoe UI", "Tahoma")
+
+
+def fallback_file(bold: bool, italic: bool) -> str | None:
+    for family in _FALLBACK_FAMILIES:
+        path = font_file(family, bold, italic)
+        if path:
+            return path
+    if sys.platform == "win32":              # kayıt defteri okunamadıysa bile Arial oradadır
+        name = {(False, False): "arial", (True, False): "arialbd",
+                (False, True): "ariali", (True, True): "arialbi"}[(bold, italic)]
+        path = os.path.join(_FONTS_DIR, name + ".ttf")
+        return path if os.path.exists(path) else None
+    return None
+
+
 def font_file(family: str, bold: bool, italic: bool) -> str | None:
     """İstenen varyant yoksa sırayla: sadece kalın/italik, normal, ailenin herhangi bir dosyası"""
     variants = system_fonts().get(family)
@@ -96,9 +114,9 @@ def match_family(pdf_font_name: str) -> str | None:
         return None
     if key in by_norm:
         return by_norm[key]
-    # "TimesNewRomanPSMT" → "timesnewroman", "Helvetica" → Arial muadili
+    # "TimesNewRomanPSMT" → "timesnew", "Helvetica" → Arial muadili
     aliases = {"helvetica": "Arial", "helv": "Arial", "times": "Times New Roman",
-               "timesroman": "Times New Roman", "courier": "Courier New"}
+               "timesroman": "Times New Roman", "timesnew": "Times New Roman", "courier": "Courier New"}
     if key in aliases and aliases[key] in system_fonts():
         return aliases[key]
     # En uzun ortak önek — "arialnarrow" > "arial"

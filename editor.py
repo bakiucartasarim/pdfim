@@ -7,6 +7,9 @@ import fitz  # PyMuPDF
 
 import fonts
 
+# get_text("dict") varsayılanı resimlerin baytlarını da çıkarır; bize yalnız metin lazım
+TEXT_ONLY = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES
+
 _FONTS_DIR = "C:/Windows/Fonts"
 
 # Bold/italic kombinasyonuna göre fallback Arial dosyaları
@@ -16,6 +19,26 @@ _ARIAL_VARIANTS = {
     (False, True):  "ariali.ttf",
     (True,  True):  "arialbi.ttf",
 }
+
+
+def _winansi(text: str) -> bool:
+    """Standart PDF fontlarıyla (Helvetica, WinAnsi) çizilebilir mi — Türkçe ş ğ ı İ değil"""
+    try:
+        text.encode("cp1252")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+_DO_RE = re.compile(rb"/([^\s/\[\]<>(){}%]+)\s+Do\b")
+
+
+def _do_counts(content: bytes) -> dict:
+    """İçerik akışında "/Ad Do" ile çizilen XObject adları → kaç kez çizildiği"""
+    counts: dict = {}
+    for name in _DO_RE.findall(content):
+        counts[name] = counts.get(name, 0) + 1
+    return counts
 
 
 class PDFEditor:
@@ -222,7 +245,7 @@ class PDFEditor:
         kaynağındaki biçimle yapıştırılabilsin diye"""
         r = fitz.Rect(rect)
         cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
-        for block in self.doc[page_num].get_text("dict")["blocks"]:
+        for block in self.doc[page_num].get_text("dict", flags=TEXT_ONLY)["blocks"]:
             for line in block.get("lines", []):
                 for s in line["spans"]:
                     b = fitz.Rect(s["bbox"])
@@ -233,15 +256,18 @@ class PDFEditor:
     def insert_new_text(self, page_num: int, origin: tuple, text: str,
                         style: dict | None = None) -> bool:
         """Sayfaya yeni metin yaz. origin: ilk satırın taban çizgisi başlangıcı (PDF pt).
-        Çok satırlı metin alt alta yazılır; Tab'lar (tablodan kopya) boşluğa çevrilir."""
+        Çok satırlı metin alt alta yazılır; Tab'lar (tablodan kopya) boşluğa çevrilir.
+        style: font/flags/size/color (kopyalanan kaynağın biçimi); isteğe bağlı family/bold/italic
+        biçim çubuğundan gelir ve flags'i ezer."""
         if not self.doc or not text.strip():
             return False
         page = self.doc[page_num]
         sp = {**self.DEFAULT_TEXT_STYLE, **(style or {})}
         flags = sp.get("flags", 0)
         text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ").rstrip("\n")
-        st = {"family": None, "size": sp["size"], "bold": bool(flags & 16),
-              "italic": bool(flags & 2), "color": sp["color"]}
+        st = {"family": sp.get("family"), "size": sp["size"],
+              "bold": sp.get("bold", bool(flags & 16)),
+              "italic": sp.get("italic", bool(flags & 2)), "color": sp["color"]}
         try:
             font_kw = self._resolve_font(page, sp, st, text)
             page.insert_text(origin, text, fontsize=sp["size"], lineheight=1.25,
@@ -273,7 +299,7 @@ class PDFEditor:
             if family:
                 candidates.append(self._file_kwargs(fonts.font_file(family, b, i)))
             candidates.append(self._find_system_font(span_info.get("font", ""), b, i))
-        candidates.append(self._file_kwargs(os.path.join(_FONTS_DIR, _ARIAL_VARIANTS[(b, i)])))
+        candidates.append(self._file_kwargs(fonts.fallback_file(b, i)))
         candidates = [c for c in candidates if c]
         for kw in candidates:
             if self._covers(kw, text):
@@ -338,22 +364,45 @@ class PDFEditor:
         if not self.doc:
             return []
         page = self.doc[page_num]
-        result, seen = [], set()
-        for img in page.get_images(full=True):
-            xref = img[0]
-            if xref in seen:
+        # Yalnız sayfada gerçekten çizilen resimlerin konumu hesaplanır. Dialux raporları
+        # belgedeki ~100 resmin hepsini her sayfanın kaynaklarına koyuyor; her biri için
+        # get_image_rects() (ve get_image_info(xrefs=True)) resimlerin özetini çıkardığından
+        # bir sayfa 5 sn sürüyordu. Hangi resmin çizildiği içerik akışındaki "/Ad Do"dan belli.
+        try:
+            items = page.get_images(full=True)
+        except Exception:
+            return []
+        if not items:
+            return []
+        drawn = {0: _do_counts(page.read_contents())}     # 0: sayfanın kendi içeriği
+        result = []
+        for item in items:
+            xref, w, h, name, referencer = item[0], item[2], item[3], item[7], item[9]
+            if referencer not in drawn:                     # form nesnesinin içindeki resim
+                drawn[referencer] = _do_counts(self.doc.xref_stream(referencer) or b"")
+            times = drawn[referencer].get(name.encode("latin-1", "replace"), 0)
+            if not times:
                 continue
-            seen.add(xref)
             try:
-                for r in page.get_image_rects(xref):
-                    rect = (r.x0, r.y0, r.x1, r.y1)
-                    # Aynı içerikli resimler farklı xref'lerde de aynı konumları döndürebiliyor
-                    if any(d["rect"] == rect for d in result):
-                        continue
-                    result.append({"xref": xref, "rect": rect,
-                                   "w": img[2], "h": img[3]})
+                # Tek çizim → hızlı sınır kutusu; aynı resim birkaç yerdeyse hepsi
+                if times > 1:
+                    rects = page.get_image_rects(item)
+                else:
+                    r = page.get_image_bbox(item)
+                    # get_image_bbox döndürülmüş sayfa koordinatı verir; get_text ve bu sınıfın
+                    # diğer işlemleri (get_image_rects gibi) döndürülmemiş koordinatla çalışır
+                    if page.rotation and not (r.is_empty or r.is_infinite):
+                        r = r * page.derotation_matrix
+                    rects = [r]
             except Exception:
                 continue
+            for r in rects:
+                if r.is_empty or r.is_infinite:
+                    continue
+                rect = (r.x0, r.y0, r.x1, r.y1)
+                if any(d["rect"] == rect for d in result):      # aynı yere iki kez çizilmiş
+                    continue
+                result.append({"xref": xref, "rect": rect, "w": w, "h": h})
         return result
 
     def _remove_image(self, page: fitz.Page, rect: tuple):
@@ -445,6 +494,308 @@ class PDFEditor:
             return True
         except Exception:
             return False
+
+    # ── Sayfa işlemleri ───────────────────────────────────────────────────────
+    # Sayfa numaraları 0 tabanlı. Hepsi hata durumunda istisna fırlatır; çağıran (köprü)
+    # geri alma kopyasını geri atar ve mesajı gösterir.
+
+    def rotate_pages(self, pages: list, delta: int) -> list:
+        for p in pages:
+            page = self.doc[p]
+            page.set_rotation((page.rotation + delta) % 360)
+        self.modified = True
+        return sorted(pages)
+
+    def delete_pages(self, pages: list) -> list:
+        pages = sorted(set(pages))
+        if len(pages) >= len(self.doc):
+            raise ValueError("Belgenin tüm sayfaları silinemez; en az bir sayfa kalmalı.")
+        self.doc.delete_pages(pages)
+        self.modified = True
+        return []
+
+    def move_pages(self, pages: list, to: int) -> list:
+        """Seçili sayfaları (kendi sıralarıyla) `to` numaralı sayfanın önüne taşı
+        (to = sayfa sayısı → sona). Dönen: taşınan sayfaların yeni numaraları."""
+        n = len(self.doc)
+        moved = sorted(set(pages))
+        rest = [i for i in range(n) if i not in set(moved)]
+        pos = sum(1 for i in rest if i < to)
+        order = rest[:pos] + moved + rest[pos:]
+        if order != list(range(n)):
+            self.doc.select(order)
+            self.modified = True
+        return list(range(pos, pos + len(moved)))
+
+    def duplicate_pages(self, pages: list) -> list:
+        """Her sayfanın bağımsız bir kopyasını hemen arkasına ekle. Dönen: kopyaların numaraları."""
+        pages = sorted(set(pages))
+        for p in reversed(pages):                   # sondan başa: önceki numaralar kaymasın
+            to = p + 1 if p + 1 < len(self.doc) else -1
+            self.doc.fullcopy_page(p, to)
+        self.modified = True
+        return [p + i + 1 for i, p in enumerate(pages)]
+
+    def insert_blank_page(self, at: int, width: float, height: float) -> list:
+        at = at if 0 <= at < len(self.doc) else len(self.doc)
+        self.doc.new_page(pno=at if at < len(self.doc) else -1, width=width, height=height)
+        self.modified = True
+        return [at]
+
+    def insert_pdf_file(self, path: str, at: int) -> list:
+        """Başka bir PDF'in tüm sayfalarını `at` numaralı sayfanın önüne ekle."""
+        try:
+            src = fitz.open(path)
+        except Exception as e:
+            raise ValueError(f"Eklenecek dosya açılamadı.\n({e})")
+        try:
+            if src.needs_pass:
+                raise ValueError("Eklenecek PDF parola korumalı.")
+            at = at if 0 <= at < len(self.doc) else len(self.doc)
+            count = len(src)
+            self.doc.insert_pdf(src, start_at=at if at < len(self.doc) else -1)
+        finally:
+            src.close()
+        self.modified = True
+        return list(range(at, at + count))
+
+    def export_pages(self, pages: list, path: str) -> bool:
+        """Seçili sayfaları (belgedeki sırayla) yeni bir PDF olarak kaydet; açık belge değişmez."""
+        out = fitz.open()
+        try:
+            for p in sorted(set(pages)):
+                out.insert_pdf(self.doc, from_page=p, to_page=p)
+            out.save(path, garbage=3, deflate=True)
+        finally:
+            out.close()
+        return True
+
+    # ── Form alanları ─────────────────────────────────────────────────────────
+
+    _FIELD_TYPES = {
+        fitz.PDF_WIDGET_TYPE_TEXT: "text", fitz.PDF_WIDGET_TYPE_CHECKBOX: "checkbox",
+        fitz.PDF_WIDGET_TYPE_RADIOBUTTON: "radio", fitz.PDF_WIDGET_TYPE_COMBOBOX: "combo",
+        fitz.PDF_WIDGET_TYPE_LISTBOX: "list", fitz.PDF_WIDGET_TYPE_SIGNATURE: "signature",
+        fitz.PDF_WIDGET_TYPE_BUTTON: "button",
+    }
+
+    def get_fields(self, page_num: int) -> list:
+        """Sayfadaki form alanları (döndürülmemiş koordinat). Düğmeler (buton) doldurulamaz, atlanır."""
+        out = []
+        for w in self.doc[page_num].widgets() or []:
+            kind = self._FIELD_TYPES.get(w.field_type)
+            if not kind or kind == "button":
+                continue
+            r = w.rect
+            item = {"xref": w.xref, "name": w.field_name or "", "type": kind,
+                    "rect": (r.x0, r.y0, r.x1, r.y1), "value": w.field_value,
+                    "readonly": bool(w.field_flags & fitz.PDF_FIELD_IS_READ_ONLY),
+                    "label": w.field_label or ""}
+            if kind == "text":
+                item["multiline"] = bool(w.field_flags & fitz.PDF_TX_FIELD_IS_MULTILINE)
+                item["maxlen"] = w.text_maxlen or 0
+                item["fontsize"] = w.text_fontsize or 0
+            elif kind in ("combo", "list"):
+                item["options"] = [c if isinstance(c, str) else c[1] for c in (w.choice_values or [])]
+            elif kind in ("checkbox", "radio"):
+                item["on"] = w.on_state()
+                item["checked"] = w.field_value not in (None, "", "Off", False)
+            out.append(item)
+        return out
+
+    def set_field(self, page_num: int, xref: int, value) -> bool:
+        page = self.doc[page_num]
+        w = next((w for w in page.widgets() or [] if w.xref == xref), None)
+        if w is None:
+            raise ValueError("Form alanı bulunamadı.")
+        if w.field_flags & fitz.PDF_FIELD_IS_READ_ONLY:
+            raise ValueError("Bu alan salt okunur.")
+        kind = self._FIELD_TYPES.get(w.field_type)
+        if kind in ("checkbox", "radio"):
+            w.field_value = w.on_state() if value else "Off"
+        else:
+            w.field_value = "" if value is None else str(value)
+        w.update()
+        if kind in ("text", "combo") and not (w.field_flags & fitz.PDF_TX_FIELD_IS_MULTILINE) \
+                and not _winansi(str(w.field_value or "")):
+            self._unicode_appearance(page, w)
+        self.modified = True
+        return True
+
+    def _unicode_appearance(self, page: fitz.Page, w: fitz.Widget):
+        """MuPDF tek satırlı alan görünümünü WinAnsi dışı harflerde (ş, ğ, ı, İ…) kırpıyor ya da
+        hiç çizmiyor. Görünümü kendimiz üretiriz: geçici sayfaya metni Unicode fontla dikeyde
+        ortalayarak yaz, o sayfanın içeriğini ve kaynaklarını alanın görünüm nesnesi yap.
+        Değer (field_value) alanda doğru durur; başka programlar kendi görünümünü üretebilir."""
+        r = w.rect
+        width, height = r.width, r.height
+        text = str(w.field_value or "")
+        fontfile = fonts.fallback_file(False, False)
+        font = fitz.Font(fontfile=fontfile) if fontfile else fitz.Font("helv")
+        size = w.text_fontsize or 0
+        if not size:                                   # otomatik: yüksekliğe ve genişliğe sığdır
+            size = height * 0.62
+            tw = font.text_length(text, fontsize=size)
+            if tw > width - 4:
+                size *= (width - 4) / tw
+        size = max(4.0, min(size, height * 0.9))
+        base = (height + size * (font.ascender + font.descender)) / 2   # görsel ortalama
+        tmp = fitz.open()
+        try:
+            tp = tmp.new_page(width=width, height=height)
+            kw = {"fontfile": fontfile, "fontname": "PDFimUni"} if fontfile else {"fontname": "helv"}
+            color = w.text_color or (0, 0, 0)
+            tp.insert_text((2, base), text, fontsize=size, color=color, **kw)
+            self.doc.insert_pdf(tmp)
+        finally:
+            tmp.close()
+        src = self.doc[len(self.doc) - 1]
+        content = src.read_contents()
+        rtype, res = self.doc.xref_get_key(src.xref, "Resources")
+        res = res if rtype in ("dict", "xref") else "<<>>"
+        form = self.doc.get_new_xref()
+        self.doc.update_object(form, f"<</Type/XObject/Subtype/Form/BBox[0 0 {width:g} {height:g}]/Resources {res}>>")
+        self.doc.update_stream(form, content)
+        self.doc.delete_page(len(self.doc) - 1)       # fontlar görünüm nesnesinden referanslı, kalır
+        self.doc.xref_set_key(w.xref, "AP", f"<</N {form} 0 R>>")
+
+    def flatten_forms(self) -> list:
+        """Form alanlarını sayfanın kalıcı parçası yap (değerler artık değiştirilemez)"""
+        if not any(p.first_widget for p in self.doc):
+            raise ValueError("Belgede form alanı yok.")
+        self.doc.bake(annots=False, widgets=True)
+        self.modified = True
+        return []
+
+    # ── Açıklamalar (vurgu, not, şekil, serbest çizim) ────────────────────────
+    # Standart PDF açıklama nesneleri: diğer programlarda da ayrı öğe olarak görünür,
+    # taşınır, silinir. Renkler 0xRRGGBB tamsayı.
+
+    _ANNOT_KINDS = {
+        fitz.PDF_ANNOT_HIGHLIGHT: "highlight", fitz.PDF_ANNOT_UNDERLINE: "underline",
+        fitz.PDF_ANNOT_STRIKE_OUT: "strikeout", fitz.PDF_ANNOT_SQUIGGLY: "squiggly",
+        fitz.PDF_ANNOT_TEXT: "note", fitz.PDF_ANNOT_FREE_TEXT: "freetext",
+        fitz.PDF_ANNOT_SQUARE: "rect", fitz.PDF_ANNOT_CIRCLE: "ellipse",
+        fitz.PDF_ANNOT_LINE: "line", fitz.PDF_ANNOT_INK: "ink",
+        fitz.PDF_ANNOT_POLYGON: "polygon", fitz.PDF_ANNOT_POLY_LINE: "polyline",
+        fitz.PDF_ANNOT_STAMP: "stamp",
+    }
+    # set_rect ile taşınabilenler (işaretleme, çizgi ve serbest çizimin şekli noktalarla tanımlı)
+    MOVABLE_ANNOTS = {"note", "freetext", "rect", "ellipse", "stamp"}
+
+    @staticmethod
+    def _rgb(color: int) -> tuple:
+        return (((color >> 16) & 255) / 255, ((color >> 8) & 255) / 255, (color & 255) / 255)
+
+    @staticmethod
+    def _hex(rgb) -> int | None:
+        if not rgb:
+            return None
+        r, g, b = (list(rgb) + [0, 0, 0])[:3]
+        return (round(r * 255) << 16) | (round(g * 255) << 8) | round(b * 255)
+
+    def get_annots(self, page_num: int) -> list:
+        out = []
+        for a in self.doc[page_num].annots() or []:
+            kind = self._ANNOT_KINDS.get(a.type[0])
+            if not kind:
+                continue
+            r, colors = a.rect, a.colors or {}
+            info = a.info or {}
+            out.append({"xref": a.xref, "kind": kind, "rect": (r.x0, r.y0, r.x1, r.y1),
+                        "color": self._hex(colors.get("stroke")), "fill": self._hex(colors.get("fill")),
+                        "content": info.get("content", ""), "author": info.get("title", ""),
+                        "width": (a.border or {}).get("width") or 0,
+                        "movable": kind in self.MOVABLE_ANNOTS})
+        return out
+
+    def _finish(self, annot, color: int | None, width: float | None = None, fill: int | None = None):
+        if color is not None:
+            annot.set_colors(stroke=self._rgb(color), fill=self._rgb(fill) if fill is not None else None)
+        if width:
+            annot.set_border(width=width)
+        annot.set_info(title="PDFim")
+        annot.update()
+        self.modified = True
+        return True
+
+    def add_markup(self, page_num: int, rect: tuple, kind: str, color: int) -> bool:
+        """Dikdörtgenin içindeki kelimeleri satır satır vurgula / altını / üstünü çiz"""
+        page = self.doc[page_num]
+        sel = fitz.Rect(rect)
+        sel.normalize()
+        words = [w for w in page.get_text("words")
+                 if sel.contains(fitz.Point((w[0] + w[2]) / 2, (w[1] + w[3]) / 2))]
+        if not words:
+            raise ValueError("Seçilen alanda metin yok.")
+        words.sort(key=lambda w: ((w[1] + w[3]) / 2, w[0]))
+        rows: list[list] = []
+        for w in words:                                  # aynı hizadaki kelimeler tek satır
+            cy, h = (w[1] + w[3]) / 2, w[3] - w[1]
+            if rows and abs(cy - (rows[-1][1] + rows[-1][3]) / 2) <= h * 0.5:
+                last = rows[-1]
+                rows[-1] = [min(last[0], w[0]), min(last[1], w[1]), max(last[2], w[2]), max(last[3], w[3])]
+            else:
+                rows.append(list(w[:4]))
+        add = {"highlight": page.add_highlight_annot, "underline": page.add_underline_annot,
+               "strikeout": page.add_strikeout_annot}[kind]
+        return self._finish(add([fitz.Rect(r) for r in rows]), color)
+
+    def add_note(self, page_num: int, point: tuple, text: str, color: int) -> bool:
+        page = self.doc[page_num]          # sayfa nesnesi yaşamalı: açıklama ona bağlı
+        annot = page.add_text_annot(fitz.Point(point), text, icon="Comment")
+        return self._finish(annot, color)
+
+    def add_shape(self, page_num: int, kind: str, a: tuple, b: tuple, color: int, width: float) -> bool:
+        page = self.doc[page_num]
+        if kind in ("rect", "ellipse"):
+            r = fitz.Rect(a, b)
+            r.normalize()
+            if r.width < 2 or r.height < 2:
+                raise ValueError("Şekil çok küçük.")
+            annot = (page.add_rect_annot if kind == "rect" else page.add_circle_annot)(r)
+        else:
+            if abs(a[0] - b[0]) + abs(a[1] - b[1]) < 2:
+                raise ValueError("Çizgi çok kısa.")
+            annot = page.add_line_annot(fitz.Point(a), fitz.Point(b))
+            if kind == "arrow":
+                annot.set_line_ends(fitz.PDF_ANNOT_LE_NONE, fitz.PDF_ANNOT_LE_OPEN_ARROW)
+        return self._finish(annot, color, width)
+
+    def add_ink(self, page_num: int, strokes: list, color: int, width: float) -> bool:
+        strokes = [[(float(x), float(y)) for x, y in s] for s in strokes if len(s) >= 2]
+        if not strokes:
+            raise ValueError("Çizim çok kısa.")
+        page = self.doc[page_num]
+        annot = page.add_ink_annot(strokes)
+        return self._finish(annot, color, width)
+
+    def update_annot(self, page_num: int, xref: int, changes: dict) -> bool:
+        page = self.doc[page_num]
+        annot = page.load_annot(int(xref))
+        if annot is None:
+            raise ValueError("Açıklama bulunamadı.")
+        if "rect" in changes:
+            annot.set_rect(fitz.Rect(changes["rect"]))
+        if "content" in changes:
+            annot.set_info(content=str(changes["content"]))
+        if "color" in changes:
+            kind = self._ANNOT_KINDS.get(annot.type[0])
+            fill = (annot.colors or {}).get("fill")
+            annot.set_colors(stroke=self._rgb(int(changes["color"])),
+                             fill=fill if kind in ("rect", "ellipse") else None)
+        annot.update()
+        self.modified = True
+        return True
+
+    def delete_annot(self, page_num: int, xref: int) -> bool:
+        page = self.doc[page_num]
+        annot = page.load_annot(int(xref))
+        if annot is None:
+            raise ValueError("Açıklama bulunamadı.")
+        page.delete_annot(annot)
+        self.modified = True
+        return True
 
     # ── Kaydet / Kapat ────────────────────────────────────────────────────────
 
@@ -544,8 +895,8 @@ class PDFEditor:
         if not result:
             text = span_info.get("text", "")
             if any(ord(c) > 127 for c in text):
-                f = os.path.join(_FONTS_DIR, _ARIAL_VARIANTS[(is_bold, is_italic)])
-                if os.path.exists(f):
+                f = fonts.fallback_file(is_bold, is_italic)
+                if f:
                     result = {"fontfile": f, "fontname": f"PDFimArial{int(is_bold)}{int(is_italic)}"}
             if not result:
                 result = {"fontname": "helv"}
