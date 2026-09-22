@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>PDFim</title>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- Üst çubuk -->
+<header id="topbar">
+  <div class="brand">
+    <img id="app-logo" src="img/logo.png" alt="">
+    <span class="wordmark">pdfim</span>
+  </div>
+  <div class="doc-chip">
+    <span class="ms">description</span>
+    <span id="doc-title">Belge açılmadı</span>
+  </div>
+
+  <nav id="mode-tabs" aria-label="Çalışma modu">
+    <button type="button" data-mode="duzenle">Düzenle</button>
+    <button type="button" data-mode="aciklama">Açıklama &amp; Not</button>
+    <button type="button" data-mode="sayfalar">Sayfalar</button>
+    <button type="button" data-mode="form">Form &amp; İmza</button>
+  </nav>
+
+  <div class="topbar-actions">
+    <div class="btn-group">
+      <button type="button" id="btn-undo" class="icon-btn" title="Geri al (Ctrl+Z)" disabled><span class="ms">undo</span></button>
+      <button type="button" id="btn-redo" class="icon-btn" title="Yinele (Ctrl+Y)" disabled><span class="ms">redo</span></button>
+    </div>
+    <button type="button" id="btn-open" class="btn" title="Aç (Ctrl+O)"><span class="ms">folder_open</span><span class="label">Aç</span></button>
+    <button type="button" id="btn-save" class="btn btn-primary" title="Kaydet (Ctrl+S) · Farklı kaydet (Ctrl+Shift+S)" disabled><span class="ms">save</span><span class="label">Kaydet</span></button>
+  </div>
+</header>
+
+<!-- Araç şeridi -->
+<div id="tool-strip" role="toolbar" aria-label="Araçlar">
+  <button type="button" class="tool-btn" data-tool="secim" title="Seçim"><span class="ms">arrow_selector_tool</span><span class="label">Seçim</span></button>
+  <button type="button" class="tool-btn" data-tool="metin" title="Metin (Ctrl+1)"><span class="ms">title</span><span class="label">Metin</span></button>
+  <button type="button" class="tool-btn" data-tool="resim" title="Resim Ekle (Ctrl+2)"><span class="ms">image</span><span class="label">Resim Ekle</span></button>
+  <button type="button" class="tool-btn" data-tool="metin-sec" title="Metin Seç (Ctrl+3)"><span class="ms">select_all</span><span class="label">Metin Seç</span></button>
+  <span class="strip-sep"></span>
+  <button type="button" class="tool-btn tool-danger" data-tool="alan-sil" title="Alan Sil (Ctrl+4)"><span class="ms">ink_eraser</span><span class="label">Alan Sil</span></button>
+  <span class="strip-spacer"></span>
+  <span id="page-counter"></span>
+  <button type="button" id="btn-inspector" class="icon-btn" title="Özellikler panelini aç / kapat"><span class="ms">tune</span></button>
+</div>
+
+<main id="workspace">
+  <!-- Sol ray -->
+  <aside id="left-rail">
+    <div class="rail-tabs">
+      <button type="button" class="icon-btn is-active" title="Sayfalar"><span class="ms">view_sidebar</span></button>
+      <button type="button" class="icon-btn" title="Yer imleri (yakında)" disabled><span class="ms">bookmark</span></button>
+      <button type="button" class="icon-btn" title="Katmanlar (yakında)" disabled><span class="ms">layers</span></button>
+      <button type="button" class="icon-btn" title="Ara (yakında)" disabled><span class="ms">search</span></button>
+    </div>
+    <div class="rail-head">
+      <span class="caps">Sayfalar</span>
+      <span id="thumb-count"></span>
+    </div>
+    <div id="thumb-list"></div>
+  </aside>
+
+  <!-- Belge sahnesi -->
+  <section id="stage-wrap">
+    <div id="stage">
+      <div id="status-pill">
+        <span class="dot"></span>
+        <span id="status-text"></span>
+      </div>
+      <div id="pages"></div>
+    </div>
+
+    <div id="empty-state">
+      <img src="img/logo.png" alt="">
+      <p class="empty-title">PDF açmak için tıklayın veya sürükleyip bırakın</p>
+      <button type="button" id="btn-open-empty" class="btn btn-primary btn-lg"><span class="ms">folder_open</span><span>PDF Aç</span></button>
+      <p class="empty-hint">Ctrl+O</p>
+    </div>
+
+    <div id="zoom-bar">
+      <div class="zb-group">
+        <button type="button" id="page-prev" class="icon-btn" title="Önceki sayfa"><span class="ms">chevron_left</span></button>
+        <input id="page-input" type="text" inputmode="numeric" aria-label="Sayfa numarası">
+        <span id="page-total">/ 0</span>
+        <button type="button" id="page-next" class="icon-btn" title="Sonraki sayfa"><span class="ms">chevron_right</span></button>
+      </div>
+      <span class="zb-sep"></span>
+      <button type="button" id="fit-width" class="btn btn-ghost" title="Genişliğe sığdır (Ctrl+W)"><span class="ms">fit_width</span><span class="label">Genişlik</span></button>
+      <button type="button" id="fit-page" class="btn btn-ghost" title="Sayfaya sığdır (Ctrl+Shift+W)"><span class="ms">fit_screen</span><span class="label">Sayfa</span></button>
+      <span class="zb-sep"></span>
+      <button type="button" id="zoom-out" class="icon-btn" title="Uzaklaş (Ctrl+-)"><span class="ms">zoom_out</span></button>
+      <input id="zoom-slider" type="range" min="25" max="400" value="100" aria-label="Yakınlaştırma">
+      <span id="zoom-label">100%</span>
+      <button type="button" id="zoom-in" class="icon-btn" title="Yakınlaş (Ctrl+=)"><span class="ms">zoom_in</span></button>
+    </div>
+  </section>
+
+  <!-- Sağ panel -->
+  <aside id="inspector">
+    <div class="inspector-head">
+      <span class="inspector-title">Özellikler</span>
+      <button type="button" id="inspector-close" class="icon-btn" title="Kapat"><span class="ms">close</span></button>
+    </div>
+    <div id="inspector-body">
+      <p class="muted">Bir metin ya da resim seçildiğinde özellikleri burada görünür.</p>
+    </div>
+  </aside>
+</main>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
