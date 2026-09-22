@@ -1,0 +1,4 @@
+PyMuPDF==1.27.2.3
+PyQt6==6.11.0
+# Sadece exe/kurulum derlemek için
+pyinstaller==6.21.0

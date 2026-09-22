@@ -1,0 +1,4 @@
+# PDF iç yapısı bayt konumlarına bağlı — satır sonu dönüşümü dosyayı bozar
+*.pdf binary
+*.ico binary
+*.png binary

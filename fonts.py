@@ -1,0 +1,108 @@
+"""Windows'a kurulu fontlar — aile adı → (kalın, italik) varyant dosyaları"""
+
+import os
+import re
+
+try:
+    import winreg
+except ImportError:          # Windows dışı: font listesi boş kalır, fallback'ler çalışır
+    winreg = None
+
+_FONTS_DIR = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+_REG_PATH = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"
+
+# Uzundan kısaya: "Bold Italic" önce denenmeli, yoksa "Italic" olarak yakalanır
+_STYLE_SUFFIXES = [
+    ("bold italic",  (True,  True)),
+    ("bold oblique", (True,  True)),
+    ("bold",         (True,  False)),
+    ("italic",       (False, True)),
+    ("oblique",      (False, True)),
+    ("regular",      (False, False)),
+]
+
+_cache: dict | None = None
+
+
+def _norm(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def system_fonts() -> dict:
+    """{"Arial": {(False, False): "C:/.../arial.ttf", (True, False): ".../arialbd.ttf", ...}}"""
+    global _cache
+    if _cache is not None:
+        return _cache
+    fams: dict = {}
+    if winreg is None:
+        _cache = fams
+        return fams
+    # HKCU: kullanıcının yönetici yetkisi olmadan kurduğu fontlar
+    for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            key = winreg.OpenKey(root, _REG_PATH)
+        except OSError:
+            continue
+        with key:
+            i = 0
+            while True:
+                try:
+                    name, file, _ = winreg.EnumValue(key, i)
+                except OSError:
+                    break
+                i += 1
+                if not isinstance(file, str) or not file.lower().endswith((".ttf", ".otf", ".ttc")):
+                    continue
+                path = file if os.path.isabs(file) else os.path.join(_FONTS_DIR, file)
+                if not os.path.exists(path):
+                    continue
+                # "Cambria & Cambria Math (TrueType)" → "Cambria" (.ttc'nin ilk fontu)
+                name = re.sub(r"\s*\((TrueType|OpenType)\)\s*$", "", name).split("&")[0].strip()
+                style = (False, False)
+                for suffix, st in _STYLE_SUFFIXES:
+                    if name.lower().endswith(" " + suffix):
+                        name, style = name[: -len(suffix) - 1].strip(), st
+                        break
+                if name:
+                    fams.setdefault(name, {}).setdefault(style, path)
+    _cache = fams
+    return fams
+
+
+def font_file(family: str, bold: bool, italic: bool) -> str | None:
+    """İstenen varyant yoksa sırayla: sadece kalın/italik, normal, ailenin herhangi bir dosyası"""
+    variants = system_fonts().get(family)
+    if not variants:
+        return None
+    for key in ((bold, italic), (bold, False), (False, italic), (False, False)):
+        if key in variants:
+            return variants[key]
+    return next(iter(variants.values()))
+
+
+def match_family(pdf_font_name: str) -> str | None:
+    """PDF'teki font adını ("ABCDEF+Arial-BoldMT") kurulu bir aileyle eşleştir"""
+    if not pdf_font_name:
+        return None
+    name = pdf_font_name.split("+")[-1]                     # subset öneki
+    by_norm = {_norm(f): f for f in system_fonts()}
+    # Önce tam ad: "Segoe UI Semibold" kendi başına bir aile; "bold"u silersek "Semi" kalır
+    if _norm(name) in by_norm:
+        return by_norm[_norm(name)]
+    name = re.sub(r"(?i)[-,_ ]?(bold|italic|oblique|regular|roman|mt|ps)+$", "", name)
+    name = re.sub(r"(?i)(bold|italic|oblique|regular|roman|mt|ps)+$", "", name)
+    key = _norm(name)
+    if not key:
+        return None
+    if key in by_norm:
+        return by_norm[key]
+    # "TimesNewRomanPSMT" → "timesnewroman", "Helvetica" → Arial muadili
+    aliases = {"helvetica": "Arial", "helv": "Arial", "times": "Times New Roman",
+               "timesroman": "Times New Roman", "courier": "Courier New"}
+    if key in aliases and aliases[key] in system_fonts():
+        return aliases[key]
+    # En uzun ortak önek — "arialnarrow" > "arial"
+    best = max(by_norm, key=lambda n: (key.startswith(n) or n.startswith(key)) * len(n), default=None)
+    if best and (key.startswith(best) or best.startswith(key)) and len(best) >= 4:
+        return by_norm[best]
+    return None

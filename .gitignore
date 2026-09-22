@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+venv*/
+.venv/
+
+# PyInstaller / Inno Setup çıktıları — kurulum paketi GitHub Releases'e yüklenir
+build/
+dist/
+
+# Yerel
+debug.log
+*.code-workspace
+~pdfim_*.pdf
