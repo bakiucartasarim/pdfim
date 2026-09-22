@@ -4,6 +4,7 @@ import sys
 import os
 import json
 import datetime
+import tempfile
 import traceback
 
 from PyQt6.QtWidgets import (
@@ -17,6 +18,7 @@ from PyQt6.QtGui import QAction, QKeySequence, QFont, QIcon, QPixmap, QImageRead
 from editor import PDFEditor
 from viewer import PDFViewerWidget, ThumbnailWidget, EditOverlay
 from format_bar import FormatBar
+import fonts
 
 
 # ── Sabitler ─────────────────────────────────────────────────────────────────
@@ -180,6 +182,8 @@ class MainWindow(QMainWindow):
         self._zoom = DEFAULT_ZOOM
         self._current_mode = "text"
         self._last_copied = ""
+        self._last_copied_style: dict | None = None   # kopyalanan metnin kaynak biçimi
+        self._paste_pending: tuple | None = None      # (metin, biçim) — yerleştirme bekliyor
         self._last_dir = ""
         self._last_page = 0          # resim eklerken hangi sayfa
 
@@ -214,6 +218,9 @@ class MainWindow(QMainWindow):
         self.viewer.area_erase_done.connect(self._on_erase_area)
         self.viewer.image_align_req.connect(self._on_image_align)
         self.viewer.copy_requested.connect(self._on_copy_requested)
+        self.viewer.place_done.connect(self._on_paste_placed)
+        self.viewer.place_cancelled.connect(
+            lambda: self._status_lbl.setText("Yapıştırma iptal edildi."))
         self.viewer.ctrl_scroll.connect(lambda d: self._zoom_in() if d > 0 else self._zoom_out())
         self.viewer._scroll.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
@@ -297,6 +304,12 @@ class MainWindow(QMainWindow):
         self.act_copy.setEnabled(False)
         self.act_copy.triggered.connect(self._copy_current)
         m_edit.addAction(self.act_copy)
+
+        self.act_paste = QAction("Yapıştır", self)
+        self.act_paste.setShortcut(QKeySequence.StandardKey.Paste)
+        self.act_paste.setEnabled(False)
+        self.act_paste.triggered.connect(self._paste)
+        m_edit.addAction(self.act_paste)
 
         self.act_select_all = QAction("Sayfadaki Tüm Metni Seç", self)
         self.act_select_all.setShortcut(QKeySequence.StandardKey.SelectAll)
@@ -425,6 +438,8 @@ class MainWindow(QMainWindow):
         self.act_redo_tb = act("↪  İleri", "Ctrl+Y", self._redo,  enabled=False)
         self.act_copy_tb = act("📋  Kopyala", "Ctrl+C", self._copy_current, enabled=False,
                                tip="Kopyala — tıklanan metni ya da seçili alanı panoya alır")
+        self.act_paste_tb = act("📥  Yapıştır", "Ctrl+V", self._paste, enabled=False,
+                                tip="Yapıştır — panodaki metni tıkladığınız yere, resmi sayfaya ekler")
 
         tb.addSeparator()
 
@@ -580,7 +595,8 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"PDFim — {name}")
         for a in (self.act_save, self.act_save_tb, self.act_saveas, self.act_saveas_tb,
-                  self.act_copy, self.act_select_all, self.act_copy_tb):
+                  self.act_copy, self.act_select_all, self.act_copy_tb,
+                  self.act_paste, self.act_paste_tb):
             a.setEnabled(True)
 
         # Undo/redo sıfırla
@@ -885,14 +901,19 @@ class MainWindow(QMainWindow):
         if not txt:
             self._status_lbl.setText("Seçilen alanda metin yok.")
             return
-        self._to_clipboard(txt)
+        self._to_clipboard(txt, style=self.editor.style_at(page_num, rects[0]))
 
-    def _to_clipboard(self, txt: str, what: str = ""):
+    @staticmethod
+    def _span_style(span: dict) -> dict:
+        return {k: span[k] for k in ("font", "flags", "size", "color") if k in span}
+
+    def _to_clipboard(self, txt: str, what: str = "", style: dict | None = None):
         if not txt:
             self._status_lbl.setText("Kopyalanacak metin yok.")
             return
         QApplication.clipboard().setText(txt)
         self._last_copied = txt
+        self._last_copied_style = style
         preview = txt.replace("\n", " ").replace("\t", " · ")[:50]
         self._status_lbl.setText(f"Kopyalandı{what} ({len(txt)} karakter): \"{preview}\"")
 
@@ -904,10 +925,11 @@ class MainWindow(QMainWindow):
         if self._current_mode == "text":
             sel = self.viewer.selected_span()
             if sel:
-                self._to_clipboard(self.editor.clean_text(sel[1]["text"]).strip())
+                self._to_clipboard(self.editor.clean_text(sel[1]["text"]).strip(),
+                                   style=self._span_style(sel[1]))
                 return
         if self._last_copied:
-            self._to_clipboard(self._last_copied)
+            self._to_clipboard(self._last_copied, style=self._last_copied_style)
         else:
             self._status_lbl.setText(
                 "Önce bir metne tıklayın (Metin modu) ya da alan seçin (Metin Seç modu, Ctrl+3).")
@@ -925,9 +947,10 @@ class MainWindow(QMainWindow):
     def _on_copy_requested(self, kind: str, span, page_num: int):
         """Sağ tık menüsünden gelen kopyalama istekleri"""
         if kind == "span":
-            self._to_clipboard(self.editor.clean_text(span["text"]).strip())
+            self._to_clipboard(self.editor.clean_text(span["text"]).strip(), style=self._span_style(span))
         elif kind == "line":
-            self._to_clipboard(self.editor.line_text_at(page_num, span["rect"]), " — satır")
+            self._to_clipboard(self.editor.line_text_at(page_num, span["rect"]), " — satır",
+                               style=self._span_style(span))
         elif kind == "page":
             if self._current_mode == "select":
                 self._select_page_text()
@@ -935,6 +958,79 @@ class MainWindow(QMainWindow):
                 self._to_clipboard(self.editor.page_text(page_num), f" — sayfa {page_num + 1}")
         elif kind == "selection":
             self._copy_current()
+
+    # ── Yapıştırma ────────────────────────────────────────────────────────────
+
+    def _paste(self):
+        """Ctrl+V / Yapıştır düğmesi.
+        Düzenleme kutusu açıksa oraya; panoda resim varsa sayfaya; metin varsa
+        kullanıcının tıklayacağı yere (önizleme imleci takip eder)."""
+        if not self.editor.doc:
+            return
+        ov = self._live_overlay()
+        if ov:                                   # (Ctrl+V'yi kutu zaten kendisi karşılar; bu düğme için)
+            ov.paste(); ov.setFocus(); return
+        md = QApplication.clipboard().mimeData()
+        if md is not None and md.hasImage():
+            self._paste_image(QApplication.clipboard().image())
+            return
+        txt = QApplication.clipboard().text()
+        if not txt.strip():
+            self._status_lbl.setText("Panoda yapıştırılacak metin veya resim yok.")
+            return
+        # PDFim'den kopyalandıysa kaynağın biçimi; dışarıdan geldiyse Arial 10
+        style = self._last_copied_style if txt == self._last_copied else None
+        if style:
+            c = style.get("color", 0)
+            lum = (0.299 * (c >> 16 & 255) + 0.587 * (c >> 8 & 255) + 0.114 * (c & 255)) / 255
+            if lum > 0.85:
+                # Koyu zemin üstündeki beyaz başlık (ör. mavi bant) beyaz sayfaya
+                # yapıştırılınca görünmez oluyordu; font/punto/kalınlık korunur, renk siyah
+                style = {**style, "color": 0x000000}
+        sp = {**self.editor.DEFAULT_TEXT_STYLE, **(style or {})}
+        self._paste_pending = (txt, style)
+        lines = txt.replace("\r\n", "\n").replace("\t", "    ").rstrip("\n").split("\n")
+        preview_family = fonts.match_family(sp["font"]) or "Arial"
+        self.viewer.start_placement(lines, sp["size"], preview_family, sp["color"])
+        n = len(lines)
+        self._status_lbl.setText(
+            f"Yapıştırılacak yere tıklayın ({n} satır{', kaynak biçimiyle' if style else ''})  ·  "
+            "Metin kenarlarına yapışır  ·  Esc / sağ tık → vazgeç")
+
+    def _on_paste_placed(self, wx: float, wy: float, page_num: int):
+        if not self._paste_pending:
+            return
+        txt, style = self._paste_pending
+        self._paste_pending = None
+        z = self.viewer.zoom
+        self._push_snapshot()
+        if self.editor.insert_new_text(page_num, (wx / z, wy / z), txt, style):
+            self._refresh_page(page_num)
+            self._mark_modified()
+            self._status_lbl.setText("Yapıştırıldı  ·  Düzenlemek için çift tıklayın  ·  Ctrl+S ile kaydet")
+        else:
+            self._undo_stack.pop()
+            self._sync_undo_redo()
+            self._status_lbl.setText("Metin yapıştırılamadı.")
+
+    def _paste_image(self, img):
+        if img.isNull():
+            self._status_lbl.setText("Panodaki resim okunamadı.")
+            return
+        fd, tmp = tempfile.mkstemp(suffix=".png", prefix="pdfim_paste_")
+        os.close(fd)
+        try:
+            if not img.save(tmp, "PNG"):
+                self._status_lbl.setText("Panodaki resim okunamadı.")
+                return
+            if self._current_mode != "image":
+                self._set_mode("image")          # eklenen resim seçili gelsin, hemen sürüklenebilsin
+            self._insert_image_path(tmp, "panodan resim")
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
     def _on_erase_area(self, wr: tuple, page_num: int):
         if not self.editor.doc:
@@ -1029,6 +1125,9 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
+        self._insert_image_path(path, os.path.basename(path))
+
+    def _insert_image_path(self, path: str, name: str):
         # Eskiden en son dokunulan sayfaya (çoğu zaman 1. sayfa) ekliyordu;
         # artık ekranda bakılan sayfaya.
         page_num = self.viewer.center_page()
@@ -1059,7 +1158,7 @@ class MainWindow(QMainWindow):
             if lbl:
                 lbl.select_image_near(tuple(v * z for v in rect))
             self._status_lbl.setText(
-                f"Resim eklendi: {os.path.basename(path)}  ·  Sürükle → kılavuzlara yapışır  ·  "
+                f"Resim eklendi: {name}  ·  Sürükle → kılavuzlara yapışır  ·  "
                 "Sağ tık → Hizala  ·  Alt → serbest")
         else:
             self._undo_stack.pop()
@@ -1133,10 +1232,10 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "PDFim Hakkında",
             "<h2 style='color:#cdd6f4; margin:0'>PDFim</h2>"
-            "<p style='color:#a6adc8'>Sürüm 1.4  —  PDF Editörü</p>"
+            "<p style='color:#a6adc8'>Sürüm 1.5  —  PDF Editörü</p>"
             "<p style='color:#6c7086; font-size:12px'>"
             "PyMuPDF + PyQt6 ile geliştirildi.<br>"
-            "Metin düzenleme · Biçim çubuğu · Metin kopyalama · Resim hizalama · Orijinal font desteği"
+            "Metin düzenleme · Biçim çubuğu · Kopyala-yapıştır · Resim hizalama · Orijinal font desteği"
             "</p>",
         )
 

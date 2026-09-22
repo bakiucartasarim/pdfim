@@ -112,6 +112,8 @@ class PageLabel(QLabel):
     area_erase_done     = pyqtSignal(tuple)   # aynı — "alan sil" modu
     image_align_req     = pyqtSignal(dict, str)   # (resim, "left"|"hcenter"|"right"|"top"|"vcenter"|"bottom")
     copy_requested      = pyqtSignal(str, object) # ("span"|"line"|"page"|"selection", span | None)
+    place_done          = pyqtSignal(float, float)  # yapıştırma: tıklanan taban çizgisi başlangıcı
+    place_cancelled     = pyqtSignal()
 
     SNAP_PX = 6   # bu kadar piksel yakına gelince kılavuz çizgiye yapışır
 
@@ -149,6 +151,8 @@ class PageLabel(QLabel):
         self._guides: list[tuple] = []        # ("v", x) / ("h", y)
         # Metin Seç modunda kopyalanan kelimelerin kutuları (widget koordinatı)
         self._sel_highlight: list[tuple] = []
+        # Yapıştırma yerleştirme: {"lines", "px", "family", "color", "pos", "snap_x"}
+        self._place: dict | None = None
 
     # ── Mod & veri ───────────────────────────────────────────────────────────
 
@@ -182,6 +186,33 @@ class PageLabel(QLabel):
     def set_selection_highlight(self, rects: list):
         self._sel_highlight = rects
         self.update()
+
+    def start_placement(self, lines: list, px: float, family: str, color: int):
+        """Yapıştırılacak metnin önizlemesi imleci takip eder; tıklanan yere yazılır"""
+        self._place = {"lines": lines, "px": px, "family": family, "color": color,
+                       "pos": None, "snap_x": None}
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.update()
+
+    def cancel_placement(self):
+        if self._place is not None:
+            self._place = None
+            self.set_mode(self._mode)            # imleci moda göre geri getir
+            self.update()
+
+    def _place_point(self, pos: QPoint) -> tuple:
+        """Tıklama noktası; x, metin bloklarının sol/sağ kenarlarına yapışır"""
+        x, snap = float(pos.x()), None
+        hit = self._nearest((x,), self._snap_xs)
+        if hit:
+            x, snap = hit[1], hit[1]
+        return x, float(pos.y()), snap
+
+    def leaveEvent(self, event):
+        if self._place is not None:
+            self._place["pos"] = None
+            self.update()
+        super().leaveEvent(event)
 
     def has_selection(self) -> bool:
         return bool(self._sel_highlight)
@@ -217,6 +248,15 @@ class PageLabel(QLabel):
     # ── Mouse ────────────────────────────────────────────────────────────────
 
     def mousePressEvent(self, event):
+        if self._place is not None:              # yapıştırma bekliyor: sol tık yerleştirir, sağ tık vazgeçer
+            if event.button() == Qt.MouseButton.LeftButton:
+                x, y, _ = self._place_point(event.pos())
+                self._place = None
+                self.set_mode(self._mode)
+                self.place_done.emit(x, y)
+            else:
+                self.place_cancelled.emit()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
         pos = event.pos()
@@ -260,6 +300,12 @@ class PageLabel(QLabel):
             self.text_edit_requested.emit(float(event.pos().x()), float(event.pos().y()))
 
     def mouseMoveEvent(self, event):
+        if self._place is not None:
+            x, y, snap = self._place_point(event.pos())
+            self._place["pos"] = (x, y)
+            self._place["snap_x"] = snap
+            self.update()
+            return
         if self._mode in ("select", "erase"):
             if event.buttons() & Qt.MouseButton.LeftButton and self._sel_start:
                 self._sel_cur = event.pos()
@@ -335,6 +381,8 @@ class PageLabel(QLabel):
                 self.text_drag_done.emit(span, wr[0], wr[3])
 
     def contextMenuEvent(self, event):
+        if self._place is not None:              # sağ tık yerleştirmeyi iptal eder (mousePress'te)
+            return
         if self._mode == "text":
             self._text_context_menu(event); return
         if self._mode == "select":
@@ -382,6 +430,8 @@ class PageLabel(QLabel):
         menu.exec(event.globalPos())
 
     def keyPressEvent(self, event):
+        if self._place is not None and event.key() == Qt.Key.Key_Escape:
+            self.place_cancelled.emit(); return
         if self._mode == "image" and self._selected:
             if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
                 self.image_delete_req.emit(self._selected)
@@ -394,6 +444,9 @@ class PageLabel(QLabel):
         super().paintEvent(event)
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self._place is not None:
+            self._paint_placement(p)
+            p.end(); return
         if self._mode in ("select", "erase"):
             if self._mode == "select" and self._sel_highlight:
                 for x0, y0, x1, y1 in self._sel_highlight:
@@ -441,6 +494,27 @@ class PageLabel(QLabel):
                 else:
                     p.drawLine(QPoint(0, int(v)), QPoint(self.width(), int(v)))
         p.end()
+
+    def _paint_placement(self, p: QPainter):
+        pl = self._place
+        if not pl["pos"]:
+            return
+        x, y = pl["pos"]
+        if pl["snap_x"] is not None:
+            p.setPen(QPen(QColor("#ec4899"), 1))
+            p.drawLine(QPoint(int(x), 0), QPoint(int(x), self.height()))
+        f = QFont(pl["family"])
+        f.setPixelSize(max(6, round(pl["px"])))
+        p.setFont(f)
+        c = QColor(f"#{pl['color']:06x}")
+        c.setAlpha(150)
+        p.setPen(c)
+        step = pl["px"] * 1.25                   # editor.insert_new_text ile aynı satır aralığı
+        for i, line in enumerate(pl["lines"][:60]):
+            p.drawText(QPoint(int(x), int(y + i * step)), line)
+        # Taban çizgisi işareti: metin tam bu çizginin üstüne oturur
+        p.setPen(QPen(QColor("#f59e0b"), 1, Qt.PenStyle.DashLine))
+        p.drawLine(QPoint(int(x) - 6, int(y)), QPoint(int(x) + 40, int(y)))
 
     # ── Yardımcılar ──────────────────────────────────────────────────────────
 
@@ -686,6 +760,8 @@ class PDFViewerWidget(QWidget):
     area_erase_done  = pyqtSignal(tuple, int)
     image_align_req  = pyqtSignal(dict, str, int)
     copy_requested   = pyqtSignal(str, object, int)
+    place_done       = pyqtSignal(float, float, int)
+    place_cancelled  = pyqtSignal()
     ctrl_scroll      = pyqtSignal(int)
 
     def __init__(self):
@@ -745,6 +821,8 @@ class PDFViewerWidget(QWidget):
             lbl.area_erase_done.connect(lambda wr, pg=p: self.area_erase_done.emit(wr, pg))
             lbl.image_align_req.connect(lambda img, k, pg=p: self.image_align_req.emit(img, k, pg))
             lbl.copy_requested.connect(lambda k, s, pg=p: self.copy_requested.emit(k, s, pg))
+            lbl.place_done.connect(lambda x, y, pg=p: self._on_placed(x, y, pg))
+            lbl.place_cancelled.connect(self.cancel_placement)
 
             self._layout.addWidget(wrapper, alignment=Qt.AlignmentFlag.AlignHCenter)
             self._page_labels.append(lbl)
@@ -786,6 +864,32 @@ class PDFViewerWidget(QWidget):
             if w.pos().y() + w.height() > sv:
                 return i
         return len(self._wrappers) - 1
+
+    # ── Yapıştırma yerleştirme ────────────────────────────────────────────────
+
+    def start_placement(self, lines: list, pdf_size: float, family: str, color: int):
+        """Tüm sayfalarda önizleme açılır; kullanıcı hangi sayfaya tıklarsa oraya yapışır"""
+        px = pdf_size * self.zoom
+        for lbl in self._page_labels:
+            lbl.start_placement(lines, px, family, color)
+        c = self.center_page()
+        if c < len(self._page_labels):
+            self._page_labels[c].setFocus()      # Esc ile iptal için
+
+    def is_placing(self) -> bool:
+        return any(lbl._place is not None for lbl in self._page_labels)
+
+    def cancel_placement(self):
+        was = self.is_placing()
+        for lbl in self._page_labels:
+            lbl.cancel_placement()
+        if was:
+            self.place_cancelled.emit()
+
+    def _on_placed(self, x: float, y: float, page: int):
+        for lbl in self._page_labels:
+            lbl.cancel_placement()
+        self.place_done.emit(x, y, page)
 
     def selected_span(self) -> "tuple[int, dict] | None":
         """Metin modunda tek tıkla seçili span → (sayfa, span)"""

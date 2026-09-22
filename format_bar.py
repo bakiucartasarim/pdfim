@@ -72,6 +72,7 @@ class FormatBar(QToolBar):
         self.size_box.setToolTip("Punto")
         for s in SIZES:
             self.size_box.addItem(str(s))
+        self.size_box.setCurrentIndex(-1)        # düzenleme yokken ilk öğe ("6") görünmesin
         self.size_box.activated.connect(self._emit)
         self.size_box.lineEdit().editingFinished.connect(self._emit)
         self.addWidget(self.size_box)

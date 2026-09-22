@@ -213,6 +213,45 @@ class PDFEditor:
             print(f"[replace_text] HATA: {e}")
             return False
 
+    # ── Yapıştırma: yeni metin ────────────────────────────────────────────────
+
+    DEFAULT_TEXT_STYLE = {"font": "Arial", "flags": 0, "size": 10.0, "color": 0x000000}
+
+    def style_at(self, page_num: int, rect: tuple) -> dict | None:
+        """Bir konumdaki metnin biçimi (font/flags/size/color) — kopyalanan metin
+        kaynağındaki biçimle yapıştırılabilsin diye"""
+        r = fitz.Rect(rect)
+        cx, cy = (r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2
+        for block in self.doc[page_num].get_text("dict")["blocks"]:
+            for line in block.get("lines", []):
+                for s in line["spans"]:
+                    b = fitz.Rect(s["bbox"])
+                    if b.x0 <= cx <= b.x1 and b.y0 <= cy <= b.y1:
+                        return {k: s[k] for k in ("font", "flags", "size", "color")}
+        return None
+
+    def insert_new_text(self, page_num: int, origin: tuple, text: str,
+                        style: dict | None = None) -> bool:
+        """Sayfaya yeni metin yaz. origin: ilk satırın taban çizgisi başlangıcı (PDF pt).
+        Çok satırlı metin alt alta yazılır; Tab'lar (tablodan kopya) boşluğa çevrilir."""
+        if not self.doc or not text.strip():
+            return False
+        page = self.doc[page_num]
+        sp = {**self.DEFAULT_TEXT_STYLE, **(style or {})}
+        flags = sp.get("flags", 0)
+        text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\t", "    ").rstrip("\n")
+        st = {"family": None, "size": sp["size"], "bold": bool(flags & 16),
+              "italic": bool(flags & 2), "color": sp["color"]}
+        try:
+            font_kw = self._resolve_font(page, sp, st, text)
+            page.insert_text(origin, text, fontsize=sp["size"], lineheight=1.25,
+                             color=self._int_to_rgb(sp["color"]), **font_kw)
+            self.modified = True
+            return True
+        except Exception as e:
+            print(f"[insert_new_text] HATA: {e}")
+            return False
+
     # ── Biçim: font seçimi ────────────────────────────────────────────────────
 
     def _resolve_font(self, page: fitz.Page, span_info: dict, st: dict, text: str) -> dict:

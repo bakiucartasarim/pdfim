@@ -46,6 +46,24 @@ Bir metin düzenlenirken üstteki ikinci satır etkinleşir:
   otomatik kopyalanır. **Ctrl+A** ekrandaki sayfanın tamamını seçer.
 - Tablolar sütunlar arasında **Tab** karakteriyle kopyalanır; Excel'e yapıştırınca hücrelere dağılır.
 
+### Yapıştırma
+
+![Yapıştırılacak metnin önizlemesi](docs/yapistirma.png)
+
+**📥 Yapıştır** düğmesi ya da **Ctrl+V**:
+- **Metin:** metnin gri önizlemesi imleci takip eder. Sayfada nereye tıklarsanız oraya yazılır.
+  Önizleme mevcut metinlerin kenarlarına yapışır (pembe çizgi), böylece yeni metin hizalı olur.
+  **Esc** veya **sağ tık** vazgeçer.
+  - PDFim içinden kopyaladığınız metin kaynağın font, punto ve kalınlığıyla yapışır. Dışarıdan
+    (Word, e-posta …) gelen metin Arial 10 punto olur.
+  - Çok satırlı metin alt alta yazılır. Açık renkli metin (ör. koyu bant üstündeki beyaz başlık)
+    beyaz sayfada görünmez olmasın diye siyah yapıştırılır.
+- **Resim:** panodaki resim (ör. Ekran Alıntısı Aracı ile alınmış bir görüntü ya da kopyalanmış bir
+  logo) ekrandaki sayfaya eklenir ve seçili gelir; hemen sürükleyip hizalayabilirsiniz.
+- Bir metin düzenlenirken Ctrl+V düzenleme kutusunun içine yapıştırır.
+
+Yapıştırılan metin normal metin gibi çift tıklanarak düzenlenebilir.
+
 ### Resimler (Resim modu, Ctrl+2)
 - **Resim Ekle (Ctrl+I):** resim, ekranda baktığınız sayfaya kendi en/boy oranıyla eklenir.
 - Sürüklerken sayfa kenarlarına, sayfanın ortasına, metin kenar boşluklarına ve diğer resimlere
@@ -67,7 +85,7 @@ Bir metin düzenlenirken üstteki ikinci satır etkinleşir:
 | Ctrl+O / Ctrl+S / Ctrl+Shift+S | Aç / Kaydet / Farklı kaydet |
 | Ctrl+Z / Ctrl+Y | Geri al / Yinele |
 | Ctrl+1 / 2 / 3 / 4 | Metin / Resim / Metin Seç / Alan Sil modu |
-| Ctrl+C / Ctrl+A | Kopyala / Sayfanın tüm metnini seç |
+| Ctrl+C / Ctrl+V / Ctrl+A | Kopyala / Yapıştır / Sayfanın tüm metnini seç |
 | Ctrl+B / Ctrl+U | Kalın / Altı çizili (düzenleme sırasında) |
 | Ctrl+I | Resim ekle (Resim modunda) |
 | Ctrl+= / Ctrl+- / Ctrl+tekerlek | Yakınlaş / Uzaklaş |
